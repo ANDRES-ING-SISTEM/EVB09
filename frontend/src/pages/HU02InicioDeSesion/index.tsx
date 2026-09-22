@@ -1,95 +1,68 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { authService } from '../../services/auth.service';
+import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
 export const HU02InicioDeSesion: React.FC = () => {
   const navigate = useNavigate();
   const { setAuthData } = useAuth();
-
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [credentials, setCredentials] = useState({ email: '', password: '' });
+  const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
     setCargando(true);
+    setError('');
+
     try {
-      const data = await authService.login({ email, password });
-      setAuthData({ token: data.token, usuario: data.usuario });
-      navigate('/');
+      const response = await api.post('/api/auth/login', credentials);
+      setAuthData({ token: response.data.token, usuario: response.data.usuario });
+      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('usuario', JSON.stringify(response.data.usuario));
+      navigate('/solicitar-cita');
     } catch (err: any) {
-      const mensaje =
-        err?.response?.data?.message ||
-        err?.response?.data?.error ||
-        'No fue posible iniciar sesión. Verifica tus credenciales.';
-      setError(mensaje);
+      setError(err.response?.data?.message || err.response?.data?.error || 'Credenciales inválidas.');
     } finally {
       setCargando(false);
     }
   };
 
   return (
-    <div className="p-6 max-w-md mx-auto bg-white rounded-xl shadow-md">
-      <h2 className="text-2xl font-bold mb-4 text-blue-600">HU02 - Inicio de Sesión</h2>
-      <p className="text-gray-600 mb-6">
-        Formulario de autenticación con generación de token JWT.
-      </p>
+    <div className="container mt-5 col-md-5">
+      <div className="card shadow p-4">
+        <h2 className="mb-4 text-center">HU-02 Inicio de Sesión</h2>
+        {error && <div className="alert alert-danger">{error}</div>}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-            Correo electrónico
-          </label>
-          <input
-            id="email"
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="correo@ejemplo.com"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-            Contraseña
-          </label>
-          <input
-            id="password"
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="••••••••"
-          />
-        </div>
-
-        {error && (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-            {error}
+        <form onSubmit={handleSubmit}>
+          <div className="mb-3">
+            <label className="form-label">Correo Electrónico</label>
+            <input
+              type="email"
+              className="form-control"
+              value={credentials.email}
+              onChange={(e) => setCredentials({ ...credentials, email: e.target.value })}
+              required
+            />
           </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={cargando}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-2 rounded-lg transition-colors"
-        >
-          {cargando ? 'Ingresando...' : 'Iniciar sesión'}
-        </button>
-      </form>
-
-      <p className="text-sm text-gray-500 mt-4 text-center">
-        ¿No tienes cuenta?{' '}
-        <Link to="/registro" className="text-blue-600 hover:underline">
-          Regístrate
-        </Link>
-      </p>
+          <div className="mb-3">
+            <label className="form-label">Contraseña</label>
+            <input
+              type="password"
+              className="form-control"
+              value={credentials.password}
+              onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
+              required
+            />
+          </div>
+          <button type="submit" className="btn btn-success w-100" disabled={cargando}>
+            {cargando ? 'Ingresando...' : 'Iniciar Sesión'}
+          </button>
+        </form>
+        <div className="mt-3 text-center">
+          <small>¿No tienes cuenta? <Link to="/registro">Regístrate aquí</Link></small>
+        </div>
+      </div>
     </div>
   );
 };

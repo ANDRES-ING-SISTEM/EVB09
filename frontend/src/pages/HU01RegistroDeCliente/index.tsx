@@ -1,162 +1,105 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { authService } from '../../services/auth.service';
-
-type Rol = 'PACIENTE' | 'ESPECIALISTA';
+import api from '../../services/api';
 
 export const HU01RegistroDeCliente: React.FC = () => {
   const navigate = useNavigate();
-
-  const [form, setForm] = useState({
+  const [formData, setFormData] = useState({
     nombre: '',
     apellido: '',
     email: '',
     password: '',
-    rol: 'PACIENTE' as Rol,
+    rol: 'PACIENTE'
   });
-  const [error, setError] = useState<string | null>(null);
-  const [exito, setExito] = useState(false);
+  const [mensaje, setMensaje] = useState({ tipo: '', texto: '' });
   const [cargando, setCargando] = useState(false);
-
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
     setCargando(true);
+    setMensaje({ tipo: '', texto: '' });
+
     try {
-      await authService.registro(form);
-      setExito(true);
-      setTimeout(() => navigate('/login'), 1200);
+      await api.post('/api/auth/registro', formData);
+      setMensaje({ tipo: 'success', texto: '¡Registro exitoso! Redirigiendo al inicio de sesión...' });
+      setTimeout(() => navigate('/login'), 2000);
     } catch (err: any) {
-      const mensaje =
-        err?.response?.data?.message ||
-        err?.response?.data?.error ||
-        'No fue posible completar el registro. Intenta nuevamente.';
-      setError(mensaje);
+      setMensaje({
+        tipo: 'danger',
+        texto: err.response?.data?.message || err.response?.data?.error || 'Error al registrar el usuario. Revisa los datos.'
+      });
     } finally {
       setCargando(false);
     }
   };
 
   return (
-    <div className="p-6 max-w-md mx-auto bg-white rounded-xl shadow-md">
-      <h2 className="text-2xl font-bold mb-4 text-blue-600">HU01 - Registro de Cliente</h2>
-      <p className="text-gray-600 mb-6">
-        Formulario de captura de datos de nuevo usuario (Paciente/Especialista).
-      </p>
+    <div className="container mt-5 col-md-5">
+      <div className="card shadow p-4">
+        <h2 className="mb-4 text-center">HU-01 Registro de Usuario</h2>
+        {mensaje.texto && <div className={`alert alert-${mensaje.tipo}`}>{mensaje.texto}</div>}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="nombre" className="block text-sm font-medium text-gray-700 mb-1">
-              Nombre
-            </label>
+        <form onSubmit={handleSubmit}>
+          <div className="mb-3">
+            <label className="form-label">Nombre</label>
             <input
-              id="nombre"
-              name="nombre"
               type="text"
+              className="form-control"
+              value={formData.nombre}
+              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
               required
-              value={form.nombre}
-              onChange={handleChange}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <div>
-            <label htmlFor="apellido" className="block text-sm font-medium text-gray-700 mb-1">
-              Apellido
-            </label>
+          <div className="mb-3">
+            <label className="form-label">Apellido</label>
             <input
-              id="apellido"
-              name="apellido"
               type="text"
+              className="form-control"
+              value={formData.apellido}
+              onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
               required
-              value={form.apellido}
-              onChange={handleChange}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-        </div>
-
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-            Correo electrónico
-          </label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            required
-            value={form.email}
-            onChange={handleChange}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="correo@ejemplo.com"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-            Contraseña
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            required
-            minLength={6}
-            value={form.password}
-            onChange={handleChange}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Mínimo 6 caracteres"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="rol" className="block text-sm font-medium text-gray-700 mb-1">
-            Tipo de usuario
-          </label>
-          <select
-            id="rol"
-            name="rol"
-            value={form.rol}
-            onChange={handleChange}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="PACIENTE">Paciente</option>
-            <option value="ESPECIALISTA">Especialista</option>
-          </select>
-        </div>
-
-        {error && (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-            {error}
+          <div className="mb-3">
+            <label className="form-label">Correo Electrónico</label>
+            <input
+              type="email"
+              className="form-control"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              required
+            />
           </div>
-        )}
-        {exito && (
-          <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-            Registro exitoso. Redirigiendo a inicio de sesión...
+          <div className="mb-3">
+            <label className="form-label">Contraseña</label>
+            <input
+              type="password"
+              className="form-control"
+              value={formData.password}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              required
+              minLength={6}
+            />
           </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={cargando}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-2 rounded-lg transition-colors"
-        >
-          {cargando ? 'Registrando...' : 'Crear cuenta'}
-        </button>
-      </form>
-
-      <p className="text-sm text-gray-500 mt-4 text-center">
-        ¿Ya tienes cuenta?{' '}
-        <Link to="/login" className="text-blue-600 hover:underline">
-          Inicia sesión
-        </Link>
-      </p>
+          <div className="mb-3">
+            <label className="form-label">Tipo de usuario</label>
+            <select
+              className="form-control"
+              value={formData.rol}
+              onChange={(e) => setFormData({ ...formData, rol: e.target.value })}
+            >
+              <option value="PACIENTE">Paciente</option>
+              <option value="ESPECIALISTA">Especialista</option>
+            </select>
+          </div>
+          <button type="submit" className="btn btn-primary w-100" disabled={cargando}>
+            {cargando ? 'Registrando...' : 'Registrarse'}
+          </button>
+        </form>
+        <div className="mt-3 text-center">
+          <small>¿Ya tienes cuenta? <Link to="/login">Inicia sesión aquí</Link></small>
+        </div>
+      </div>
     </div>
   );
 };

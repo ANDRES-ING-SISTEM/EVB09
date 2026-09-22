@@ -32,6 +32,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/especialidades/**").permitAll()
+                .requestMatchers("/api/disponibilidades/**").permitAll()
+                .requestMatchers("/api/citas/**").permitAll()
                 .anyRequest().authenticated()
             );
         return http.build();
@@ -56,3 +58,4 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 }
+
