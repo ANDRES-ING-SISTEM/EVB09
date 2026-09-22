@@ -17,10 +17,18 @@ export const HU02InicioDeSesion: React.FC = () => {
 
     try {
       const response = await api.post('/api/auth/login', credentials);
-      setAuthData({ token: response.data.token, usuario: response.data.usuario });
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('usuario', JSON.stringify(response.data.usuario));
-      navigate('/solicitar-cita');
+      const { token, usuario } = response.data;
+      setAuthData({ token, usuario });
+      localStorage.setItem('token', token);
+      localStorage.setItem('usuario', JSON.stringify(usuario));
+
+      if (usuario.rol === 'ESPECIALISTA') {
+        navigate('/registrar-especialidad');
+      } else if (usuario.rol === 'ADMIN') {
+        navigate('/registrar-especialidad');
+      } else {
+        navigate('/solicitar-cita');
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || err.response?.data?.error || 'Credenciales inválidas.');
     } finally {
