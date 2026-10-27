@@ -19,8 +19,7 @@ export const HU06RegistrarEspecialidad: React.FC = () => {
   return (
     <div className="container mt-4 col-md-6">
       <div className="card shadow p-4">
-        <h2>HU-06 Registrar Especialidad</h2>
-        <hr />
+        <h2 className="h4 fw-bold text-center mb-4">Registrar Especialidad</h2>
         {mensaje.texto && <div className={`alert alert-${mensaje.tipo}`}>{mensaje.texto}</div>}
         
         <form onSubmit={handleSubmit}>

@@ -30,8 +30,7 @@ export const HU09DefinirHorarios: React.FC = () => {
   return (
     <div className="container mt-4 col-md-6">
       <div className="card shadow p-4">
-        <h2>HU-09 Definir Horarios Disponibles</h2>
-        <hr />
+        <h2 className="h4 fw-bold text-center mb-4">Definir Horarios Disponibles</h2>
         {mensaje.texto && <div className={`alert alert-${mensaje.tipo}`}>{mensaje.texto}</div>}
 
         <form onSubmit={handleSubmit}>

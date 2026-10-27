@@ -34,6 +34,10 @@ public class SecurityConfig {
                 .requestMatchers("/api/especialidades/**").permitAll()
                 .requestMatchers("/api/disponibilidades/**").permitAll()
                 .requestMatchers("/api/citas/**").permitAll()
+                // Sprint 2: mismas reglas que las rutas del Sprint 1 (ver nota de seguridad en CAMBIOS_SPRINT_2.md)
+                .requestMatchers("/api/usuarios/**").permitAll()
+                .requestMatchers("/api/especialistas/**").permitAll()
+                .requestMatchers("/api/bloqueos/**").permitAll()
                 .anyRequest().authenticated()
             );
         return http.build();

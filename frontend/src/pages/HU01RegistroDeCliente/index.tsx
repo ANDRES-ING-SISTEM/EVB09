@@ -36,7 +36,7 @@ export const HU01RegistroDeCliente: React.FC = () => {
   return (
     <div className="container mt-5 col-md-5">
       <div className="card shadow p-4">
-        <h2 className="mb-4 text-center">HU-01 Registro de Usuario</h2>
+        <h2 className="h4 fw-bold text-center mb-4">Registro de Usuario</h2>
         {mensaje.texto && <div className={`alert alert-${mensaje.tipo}`}>{mensaje.texto}</div>}
 
         <form onSubmit={handleSubmit}>

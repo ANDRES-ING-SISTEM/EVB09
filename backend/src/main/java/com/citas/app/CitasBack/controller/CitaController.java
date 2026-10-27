@@ -1,5 +1,6 @@
 package com.citas.app.CitasBack.controller;
 
+import com.citas.app.CitasBack.dto.CitaResponse;
 import com.citas.app.CitasBack.model.Cita;
 import com.citas.app.CitasBack.service.CitaService;
 import org.springframework.http.ResponseEntity;
@@ -24,8 +25,11 @@ public class CitaController {
     }
 
     @GetMapping("/usuario/{usuarioId}")
-    public ResponseEntity<List<Cita>> listarPorUsuario(@PathVariable Long usuarioId) {
-        return ResponseEntity.ok(citaService.obtenerCitasPorUsuario(usuarioId));
+    public ResponseEntity<List<CitaResponse>> listarPorUsuario(@PathVariable Long usuarioId) {
+        // Sprint 2 (HU-13): se devuelve CitaResponse (incluye todos los campos del Sprint 1 + especialidad,
+        // especialista, fecha y hora) y ya no se expone el objeto Usuario completo.
+        return ResponseEntity.ok(citaService.obtenerCitasPorUsuario(usuarioId).stream()
+                .map(CitaResponse::new).toList());
     }
 
     @PutMapping("/actualizar/{citaId}")

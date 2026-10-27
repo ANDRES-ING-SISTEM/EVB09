@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 
 interface AuthContextType {
   usuario: any | null;
@@ -9,18 +9,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [usuario, setUsuario] = useState<any | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    const savedToken = localStorage.getItem('token');
+// Lee la sesión guardada ANTES del primer render, para que al recargar la página
+// (o escribir una URL) no se redirija a /login mientras se restaura la sesión.
+const leerUsuarioGuardado = (): any | null => {
+  try {
     const savedUser = localStorage.getItem('usuario');
-    if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUsuario(JSON.parse(savedUser));
-    }
-  }, []);
+    return localStorage.getItem('token') && savedUser ? JSON.parse(savedUser) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [usuario, setUsuario] = useState<any | null>(leerUsuarioGuardado);
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
 
   const setAuthData = (data: { token: string; usuario: any }) => {
     setToken(data.token);

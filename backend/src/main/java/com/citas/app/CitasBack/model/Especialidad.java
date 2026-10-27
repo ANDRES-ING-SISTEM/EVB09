@@ -21,6 +21,9 @@ public class Especialidad {
 
     private String descripcion;
 
+    // Sprint 2 (HU-07): duración de la consulta en minutos. Opcional para no afectar al Sprint 1.
+    private Integer duracionMinutos;
+
     @Column(nullable = false)
     @Builder.Default
     private Boolean activo = true;

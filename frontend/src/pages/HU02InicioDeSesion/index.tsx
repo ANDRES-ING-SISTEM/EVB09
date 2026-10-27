@@ -23,11 +23,11 @@ export const HU02InicioDeSesion: React.FC = () => {
       localStorage.setItem('usuario', JSON.stringify(usuario));
 
       if (usuario.rol === 'ESPECIALISTA') {
-        navigate('/registrar-especialidad');
+        navigate('/');
       } else if (usuario.rol === 'ADMIN') {
-        navigate('/registrar-especialidad');
+        navigate('/');
       } else {
-        navigate('/solicitar-cita');
+        navigate('/');
       }
     } catch (err: any) {
       setError(err.response?.data?.message || err.response?.data?.error || 'Credenciales inválidas.');
@@ -39,7 +39,7 @@ export const HU02InicioDeSesion: React.FC = () => {
   return (
     <div className="container mt-5 col-md-5">
       <div className="card shadow p-4">
-        <h2 className="mb-4 text-center">HU-02 Inicio de Sesión</h2>
+        <h2 className="h4 fw-bold text-center mb-4">Inicio de Sesión</h2>
         {error && <div className="alert alert-danger">{error}</div>}
 
         <form onSubmit={handleSubmit}>
