@@ -1,94 +1,72 @@
-import React, { useEffect, useState } from 'react';
-import { Link, Navigate, useSearchParams } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { estadoPendiente, hhmm, mensajeDeError, sprint2Service } from '../../services/sprint2.service';
-import { CitaDetalle } from '../../types/sprint2';
+import { useEffect, useRef, useState } from 'react';
+import DialogoConfirmacion from '../../components/DialogoConfirmacion';
+import { useAuth } from '../../hooks/useAuth';
+import { ApiError, getErrorMessage } from '../../services/api';
+import { cancelarCita } from '../../services/citas.service';
+import type { Cita } from '../../types/cita';
+import { fechaCorta, hora12 } from '../../utils/fechas';
 
-export const HU14CancelarCita: React.FC = () => {
-  const { usuario } = useAuth();
-  const [params] = useSearchParams();
-  const idCita = Number(params.get('id'));
-  const [cita, setCita] = useState<CitaDetalle | null>(null);
-  const [cargado, setCargado] = useState(false);
-  const [motivo, setMotivo] = useState('');
-  const [hecho, setHecho] = useState(false);
-  const [mensaje, setMensaje] = useState({ tipo: '', texto: '' });
-  const idUsuario: number | undefined = usuario?.id;
+interface CancelarCitaDialogoProps {
+  cita: Cita;
+  /** La persona decidió mantener la cita (escenario 3) o cerró el diálogo */
+  onMantener: () => void;
+  /** La cita quedó cancelada y el horario liberado (escenario 1) */
+  onCancelada: () => void;
+}
 
-  useEffect(() => {
-    if (!idUsuario) return;
-    sprint2Service
-      .consultarCitas(idUsuario)
-      .then((citas) => setCita(citas.find((c) => c.id === idCita) ?? null))
-      .catch((err) =>
-        setMensaje({ tipo: 'danger', texto: mensajeDeError(err, 'No se pudo cargar la cita.') })
-      )
-      .finally(() => setCargado(true));
-  }, [idUsuario, idCita]);
+// HU-14 — Cancelar cita: PUT /api/citas/{id}/cancelar. No es una pantalla con ruta propia: se abre
+// desde "Mis citas" (HU-13) como diálogo de confirmación. Solo el dueño de la cita puede cancelarla;
+// el servidor valida también si la cita admite cancelación (ya cancelada, ya ocurrida o fuera del
+// periodo permitido) y responde 409 en ese caso.
+export default function CancelarCitaDialogo({ cita, onMantener, onCancelada }: CancelarCitaDialogoProps) {
+  const { cerrarSesion } = useAuth();
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const controladorRef = useRef<AbortController | null>(null);
 
-  if (!usuario) {
-    return <Navigate to="/login" replace />;
+  useEffect(() => () => controladorRef.current?.abort(), []);
+
+  async function confirmar() {
+    if (enviando) return;
+    setError(null);
+
+    controladorRef.current?.abort();
+    const controlador = new AbortController();
+    controladorRef.current = controlador;
+    setEnviando(true);
+
+    try {
+      await cancelarCita(cita.idCita, controlador.signal);
+      onCancelada();
+    } catch (falla) {
+      if (falla instanceof DOMException && falla.name === 'AbortError') return;
+      if (falla instanceof ApiError && falla.status === 401) {
+        cerrarSesion();
+        return;
+      }
+      setError(getErrorMessage(falla));
+      setEnviando(false);
+    }
   }
 
-  const confirmar = async () => {
-    setMensaje({ tipo: '', texto: '' });
-    try {
-      const respuesta = await sprint2Service.cancelarCita(
-        idCita,
-        usuario.id,
-        motivo.trim() === '' ? null : motivo.trim()
-      );
-      setMensaje({ tipo: 'success', texto: respuesta.mensaje });
-      setHecho(true);
-    } catch (err: any) {
-      setMensaje({ tipo: 'danger', texto: mensajeDeError(err, 'No se pudo cancelar la cita.') });
-    }
-  };
-
   return (
-    <div className="container mt-4 col-md-6">
-      <div className="card shadow p-4">
-        <h2 className="h4 fw-bold text-center mb-4">Cancelar Cita</h2>
-        {mensaje.texto && <div className={`alert alert-${mensaje.tipo}`}>{mensaje.texto}</div>}
-
-        {!cargado && <p>Cargando cita...</p>}
-        {cargado && !cita && !mensaje.texto && (
-          <div className="alert alert-warning">No se encontró esa cita entre tus citas.</div>
-        )}
-        {cita && (
-          <>
-            <p>
-              <strong>{cita.especialidad}</strong>
-              {cita.especialista ? ` con ${cita.especialista}` : ''}
-              <br />
-              {cita.fechaCita} a las {hhmm(cita.horaCita)} — estado actual: {cita.estado}
-            </p>
-            {!hecho && estadoPendiente(cita.estado) && (
-              <>
-                <div className="mb-3">
-                  <label className="form-label">Motivo de la cancelación (opcional)</label>
-                  <textarea
-                    className="form-control"
-                    rows={3}
-                    maxLength={200}
-                    value={motivo}
-                    onChange={(e) => setMotivo(e.target.value)}
-                  />
-                </div>
-                <button className="btn btn-danger" onClick={confirmar}>Confirmar cancelación</button>
-              </>
-            )}
-            {!hecho && !estadoPendiente(cita.estado) && (
-              <div className="alert alert-info">Esta cita ya no se puede cancelar (estado {cita.estado}).</div>
-            )}
-          </>
-        )}
-        <div className="mt-3">
-          <Link to="/mis-citas" className="btn btn-outline-secondary">Volver a mis citas</Link>
-        </div>
-      </div>
-    </div>
+    <DialogoConfirmacion
+      titulo="¿Cancelar esta cita?"
+      descripcion="Esta acción no se puede deshacer. Se liberará el horario para otras personas."
+      textoConfirmar="Sí, cancelar cita"
+      textoCancelar="Mantener cita"
+      peligro
+      enviando={enviando}
+      error={error}
+      onConfirmar={confirmar}
+      onCancelar={onMantener}
+    >
+      <p>
+        {cita.especialidad} · {cita.especialista}
+      </p>
+      <p>
+        {fechaCorta(cita.fecha)} · {hora12(cita.hora)}
+      </p>
+    </DialogoConfirmacion>
   );
-};
-
-export default HU14CancelarCita;
+}

@@ -1,52 +1,80 @@
-import React, { createContext, useContext, useState } from 'react';
+import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useInactividad } from '../hooks/useInactividad';
+import { cerrarSesionEnServidor, obtenerSesionActual } from '../services/auth.service';
+import type { Sesion } from '../types/auth';
 
-interface AuthContextType {
-  usuario: any | null;
-  token: string | null;
-  setAuthData: (data: { token: string; usuario: any }) => void;
-  logout: () => void;
+// HU-25: la sesión se cierra tras 30 minutos sin actividad
+export const MINUTOS_INACTIVIDAD = 30;
+const AVISO_INACTIVIDAD = 'Cerramos tu sesión por inactividad. Inicia sesión de nuevo para continuar.';
+
+interface AuthContextValue {
+  /** Sesión iniciada, o null si no hay */
+  sesion: Sesion | null;
+  /** true mientras se pregunta al backend si hay una sesión abierta (al abrir o recargar la app) */
+  verificando: boolean;
+  /** Motivo por el que se cerró la sesión sin que la persona lo pidiera; lo muestra el inicio de sesión */
+  avisoSesion: string | null;
+  iniciarSesion: (sesion: Sesion) => void;
+  /** Cierra la sesión en la interfaz y en el servidor (HU-26) */
+  cerrarSesion: (aviso?: string) => void;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-// Lee la sesión guardada ANTES del primer render, para que al recargar la página
-// (o escribir una URL) no se redirija a /login mientras se restaura la sesión.
-const leerUsuarioGuardado = (): any | null => {
-  try {
-    const savedUser = localStorage.getItem('usuario');
-    return localStorage.getItem('token') && savedUser ? JSON.parse(savedUser) : null;
-  } catch {
-    return null;
-  }
-};
+// La sesión es una cookie HttpOnly: aquí solo vive en memoria quién es la persona. No se guarda
+// nada en el navegador; al recargar se vuelve a preguntar al backend (ver services/sesion.ts).
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [sesion, setSesion] = useState<Sesion | null>(null);
+  const [verificando, setVerificando] = useState(true);
+  const [avisoSesion, setAvisoSesion] = useState<string | null>(null);
+  const hayVerificacionActual = useRef(false);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [usuario, setUsuario] = useState<any | null>(leerUsuarioGuardado);
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
+  useEffect(() => {
+    const controlador = new AbortController();
+    obtenerSesionActual(controlador.signal)
+      .then((actual) => {
+        // Si la persona inició sesión mientras tanto, esa respuesta es la más reciente
+        if (!controlador.signal.aborted && !hayVerificacionActual.current) setSesion(actual);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!controlador.signal.aborted) setVerificando(false);
+      });
+    return () => controlador.abort();
+  }, []);
 
-  const setAuthData = (data: { token: string; usuario: any }) => {
-    setToken(data.token);
-    setUsuario(data.usuario);
-  };
+  // HU-26: al volver con el botón "atrás" el navegador puede restaurar la página desde su caché
+  // con la sesión ya cerrada. Se vuelve a preguntar al backend para no mostrar datos de más.
+  useEffect(() => {
+    const alMostrar = (evento: PageTransitionEvent) => {
+      if (!evento.persisted) return;
+      obtenerSesionActual()
+        .then(setSesion)
+        .catch(() => undefined);
+    };
+    window.addEventListener('pageshow', alMostrar);
+    return () => window.removeEventListener('pageshow', alMostrar);
+  }, []);
 
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('usuario');
-    setToken(null);
-    setUsuario(null);
-  };
+  const iniciarSesion = useCallback((nueva: Sesion) => {
+    hayVerificacionActual.current = true;
+    setAvisoSesion(null);
+    setSesion(nueva);
+  }, []);
 
-  return (
-    <AuthContext.Provider value={{ usuario, token, setAuthData, logout }}>
-      {children}
-    </AuthContext.Provider>
+  const cerrarSesion = useCallback((aviso?: string) => {
+    hayVerificacionActual.current = true;
+    setSesion(null);
+    setAvisoSesion(aviso ?? null);
+    void cerrarSesionEnServidor();
+  }, []);
+
+  useInactividad(sesion !== null, MINUTOS_INACTIVIDAD, () => cerrarSesion(AVISO_INACTIVIDAD));
+
+  const valor = useMemo(
+    () => ({ sesion, verificando, avisoSesion, iniciarSesion, cerrarSesion }),
+    [sesion, verificando, avisoSesion, iniciarSesion, cerrarSesion],
   );
-};
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth debe usarse dentro de AuthProvider');
-  }
-  return context;
-};
+  return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>;
+}

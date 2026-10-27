@@ -1,107 +1,286 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import api from '../../services/api';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
+import CasillaField from '../../components/CasillaField';
+import FormField from '../../components/FormField';
+import { useTitulo } from '../../hooks/useTitulo';
+import { RUTAS } from '../../routes/paths';
+import { ApiError, getErrorMessage } from '../../services/api';
+import { registrarUsuario } from '../../services/usuarios.service';
+import type { UsuarioResponse } from '../../types/usuario';
+import {
+  CAMPOS_REGISTRO,
+  MIN_CONTRASENA,
+  VALORES_INICIALES,
+  construirSolicitud,
+  esCampoRegistro,
+  esCorreoDuplicado,
+  validarAutorizacion,
+  validarRegistro,
+  type CampoRegistro,
+  type ErroresRegistro,
+  type ValoresRegistro,
+} from './validacion';
 
-export const HU01RegistroDeCliente: React.FC = () => {
-  const navigate = useNavigate();
-  const [formData, setFormData] = useState({
-    nombre: '',
-    apellido: '',
-    email: '',
-    password: '',
-    rol: 'PACIENTE'
-  });
-  const [mensaje, setMensaje] = useState({ tipo: '', texto: '' });
-  const [cargando, setCargando] = useState(false);
+type Estado = 'editando' | 'enviando' | 'exito';
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCargando(true);
-    setMensaje({ tipo: '', texto: '' });
+// HU-01 — Registro de usuario (POST /api/usuarios). La cabecera y el <main> los pone <Layout>.
+export default function HU01RegistroDeCliente() {
+  useTitulo('Crear cuenta');
+
+  const [valores, setValores] = useState<ValoresRegistro>(VALORES_INICIALES);
+  const [errores, setErrores] = useState<ErroresRegistro>({});
+  const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
+  const [autoriza, setAutoriza] = useState(false);
+  const [errorAutorizacion, setErrorAutorizacion] = useState<string | undefined>();
+  const [correoDuplicado, setCorreoDuplicado] = useState(false);
+  const [estado, setEstado] = useState<Estado>('editando');
+  const [usuarioCreado, setUsuarioCreado] = useState<UsuarioResponse | null>(null);
+
+  const controladorRef = useRef<AbortController | null>(null);
+  const exitoRef = useRef<HTMLDivElement>(null);
+
+  // Al salir de la pantalla se cancela cualquier petición en curso
+  useEffect(() => () => controladorRef.current?.abort(), []);
+
+  // Al confirmarse el registro, el foco pasa al mensaje para que lo lean los lectores de pantalla
+  useEffect(() => {
+    if (estado === 'exito') exitoRef.current?.focus();
+  }, [estado]);
+
+  const enviando = estado === 'enviando';
+
+  function cambiarValor(campo: CampoRegistro, valor: string) {
+    setValores((previo) => ({ ...previo, [campo]: valor }));
+    setErrores((previo) => {
+      if (!previo[campo]) return previo;
+      const siguiente = { ...previo };
+      delete siguiente[campo];
+      return siguiente;
+    });
+    if (campo === 'correo') setCorreoDuplicado(false);
+    setErrorGeneral(null);
+  }
+
+  function enfocarPrimerError(conErrores: ErroresRegistro) {
+    const primero = CAMPOS_REGISTRO.find((campo) => conErrores[campo]);
+    if (primero) document.getElementById(`registro-${primero}`)?.focus();
+  }
+
+  async function manejarEnvio(evento: FormEvent<HTMLFormElement>) {
+    evento.preventDefault();
+    if (enviando) return;
+
+    setErrorGeneral(null);
+    setCorreoDuplicado(false);
+
+    const erroresCliente = validarRegistro(valores);
+    const faltaAutorizacion = validarAutorizacion(autoriza);
+    if (Object.keys(erroresCliente).length > 0 || faltaAutorizacion) {
+      setErrores(erroresCliente);
+      setErrorAutorizacion(faltaAutorizacion);
+      if (Object.keys(erroresCliente).length > 0) enfocarPrimerError(erroresCliente);
+      else document.getElementById('registro-autorizacion')?.focus();
+      return;
+    }
+    setErrores({});
+    setErrorAutorizacion(undefined);
+
+    controladorRef.current?.abort();
+    const controlador = new AbortController();
+    controladorRef.current = controlador;
+    setEstado('enviando');
 
     try {
-      await api.post('/api/auth/registro', formData);
-      setMensaje({ tipo: 'success', texto: '¡Registro exitoso! Redirigiendo al inicio de sesión...' });
-      setTimeout(() => navigate('/login'), 2000);
-    } catch (err: any) {
-      setMensaje({
-        tipo: 'danger',
-        texto: err.response?.data?.message || err.response?.data?.error || 'Error al registrar el usuario. Revisa los datos.'
-      });
-    } finally {
-      setCargando(false);
+      const creado = await registrarUsuario(construirSolicitud(valores, autoriza), controlador.signal);
+      setUsuarioCreado(creado);
+      setValores(VALORES_INICIALES);
+      setAutoriza(false);
+      setEstado('exito');
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setEstado('editando');
+
+      // Errores por campo que responde el servidor: { campo: "mensaje" }
+      if (error instanceof ApiError && Object.keys(error.fieldErrors).length > 0) {
+        const delServidor: ErroresRegistro = {};
+        for (const [clave, mensaje] of Object.entries(error.fieldErrors)) {
+          if (esCampoRegistro(clave)) delServidor[clave] = mensaje;
+        }
+        if (Object.keys(delServidor).length > 0) {
+          setErrores(delServidor);
+          enfocarPrimerError(delServidor);
+          return;
+        }
+      }
+
+      const mensaje = getErrorMessage(error);
+      if (esCorreoDuplicado(mensaje)) {
+        const conCorreo: ErroresRegistro = { correo: 'Ya existe una cuenta con este correo.' };
+        setCorreoDuplicado(true);
+        setErrores(conCorreo);
+        enfocarPrimerError(conCorreo);
+        return;
+      }
+      setErrorGeneral(mensaje);
     }
-  };
+  }
 
   return (
-    <div className="container mt-5 col-md-5">
-      <div className="card shadow p-4">
-        <h2 className="h4 fw-bold text-center mb-4">Registro de Usuario</h2>
-        {mensaje.texto && <div className={`alert alert-${mensaje.tipo}`}>{mensaje.texto}</div>}
-
-        <form onSubmit={handleSubmit}>
-          <div className="mb-3">
-            <label className="form-label">Nombre</label>
-            <input
-              type="text"
-              className="form-control"
-              value={formData.nombre}
-              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-              required
-            />
-          </div>
-          <div className="mb-3">
-            <label className="form-label">Apellido</label>
-            <input
-              type="text"
-              className="form-control"
-              value={formData.apellido}
-              onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
-              required
-            />
-          </div>
-          <div className="mb-3">
-            <label className="form-label">Correo Electrónico</label>
-            <input
-              type="email"
-              className="form-control"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              required
-            />
-          </div>
-          <div className="mb-3">
-            <label className="form-label">Contraseña</label>
-            <input
-              type="password"
-              className="form-control"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              required
-              minLength={6}
-            />
-          </div>
-          <div className="mb-3">
-            <label className="form-label">Tipo de usuario</label>
-            <select
-              className="form-control"
-              value={formData.rol}
-              onChange={(e) => setFormData({ ...formData, rol: e.target.value })}
-            >
-              <option value="PACIENTE">Paciente</option>
-              <option value="ESPECIALISTA">Especialista</option>
-            </select>
-          </div>
-          <button type="submit" className="btn btn-primary w-100" disabled={cargando}>
-            {cargando ? 'Registrando...' : 'Registrarse'}
-          </button>
-        </form>
-        <div className="mt-3 text-center">
-          <small>¿Ya tienes cuenta? <Link to="/login">Inicia sesión aquí</Link></small>
+    <div className="flex flex-col items-center bg-white py-10 px-4 sm:py-16">
+      {estado === 'exito' && usuarioCreado ? (
+        <div
+          ref={exitoRef}
+          tabIndex={-1}
+          role="status"
+          className="flex flex-col items-start bg-white w-full max-w-[460px] p-6 sm:p-10 gap-5 rounded-xl shadow-[0px_8px_24px_rgba(15,23,41,0.08)] focus:outline-none"
+        >
+          <h1 className="text-slate-900 text-2xl font-bold">¡Cuenta creada!</h1>
+          <p className="text-slate-700 text-sm">
+            Registramos la cuenta de {usuarioCreado.nombre} {usuarioCreado.apellido} con el correo{' '}
+            <strong>{usuarioCreado.correo}</strong>. Ya puedes iniciar sesión para gestionar tus citas médicas.
+          </p>
+          <Link
+            to={RUTAS.login}
+            className="self-stretch text-center bg-[#1D6070] text-white text-[15px] font-semibold leading-[normal] py-3.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#1D6070]"
+          >
+            Ir a iniciar sesión
+          </Link>
         </div>
-      </div>
+      ) : (
+        <form
+          onSubmit={manejarEnvio}
+          noValidate
+          aria-busy={enviando}
+          aria-labelledby="registro-titulo"
+          className="flex flex-col items-start bg-white w-full max-w-[460px] p-6 sm:p-10 gap-5 rounded-xl shadow-[0px_8px_24px_rgba(15,23,41,0.08)]"
+        >
+          <div className="flex flex-col gap-2">
+            <h1 id="registro-titulo" className="text-slate-900 text-2xl font-bold">
+              Crear cuenta
+            </h1>
+            <p className="text-slate-500 text-sm">Regístrate para gestionar tus citas médicas</p>
+            <p className="text-slate-600 text-xs">Los campos marcados con * son obligatorios.</p>
+          </div>
+
+          {errorGeneral && (
+            <p role="alert" className="self-stretch text-red-700 text-sm border border-red-700 rounded-lg p-3">
+              {errorGeneral}
+            </p>
+          )}
+
+          <FormField
+            id="registro-nombre"
+            label="Nombre"
+            value={valores.nombre}
+            onChange={(valor) => cambiarValor('nombre', valor)}
+            error={errores.nombre}
+            placeholder="Ej. Ana María"
+            autoComplete="given-name"
+            required
+            readOnly={enviando}
+          />
+          <FormField
+            id="registro-apellido"
+            label="Apellido"
+            value={valores.apellido}
+            onChange={(valor) => cambiarValor('apellido', valor)}
+            error={errores.apellido}
+            placeholder="Ej. Pérez"
+            autoComplete="family-name"
+            required
+            readOnly={enviando}
+          />
+          <FormField
+            id="registro-correo"
+            label="Correo electrónico"
+            type="email"
+            value={valores.correo}
+            onChange={(valor) => cambiarValor('correo', valor)}
+            error={
+              errores.correo &&
+              (correoDuplicado ? (
+                <>
+                  {errores.correo}{' '}
+                  <Link to={RUTAS.login} className="underline font-medium">
+                    ¿Deseas iniciar sesión?
+                  </Link>
+                </>
+              ) : (
+                errores.correo
+              ))
+            }
+            placeholder="nombre@correo.com"
+            autoComplete="email"
+            inputMode="email"
+            required
+            readOnly={enviando}
+          />
+          <FormField
+            id="registro-telefono"
+            label="Teléfono"
+            type="tel"
+            value={valores.telefono}
+            onChange={(valor) => cambiarValor('telefono', valor)}
+            error={errores.telefono}
+            placeholder="Ej. 3001234567"
+            autoComplete="tel"
+            inputMode="tel"
+            readOnly={enviando}
+          />
+          <FormField
+            id="registro-contrasena"
+            label="Contraseña"
+            type="password"
+            value={valores.contrasena}
+            onChange={(valor) => cambiarValor('contrasena', valor)}
+            error={errores.contrasena}
+            hint={`Mínimo ${MIN_CONTRASENA} caracteres.`}
+            autoComplete="new-password"
+            required
+            readOnly={enviando}
+          />
+          <FormField
+            id="registro-confirmarContrasena"
+            label="Confirmar contraseña"
+            type="password"
+            value={valores.confirmarContrasena}
+            onChange={(valor) => cambiarValor('confirmarContrasena', valor)}
+            error={errores.confirmarContrasena}
+            placeholder="Repite tu contraseña"
+            autoComplete="new-password"
+            required
+            readOnly={enviando}
+          />
+
+          <CasillaField
+            id="registro-autorizacion"
+            label="Autorizo el tratamiento de mis datos personales y de salud para gestionar mis citas médicas."
+            checked={autoriza}
+            onChange={(marcada) => {
+              setAutoriza(marcada);
+              if (marcada) setErrorAutorizacion(undefined);
+            }}
+            error={errorAutorizacion}
+            required
+            disabled={enviando}
+          />
+
+          <button
+            type="submit"
+            aria-disabled={enviando}
+            className="self-stretch bg-[#1D6070] text-white text-[15px] font-semibold leading-[normal] py-3.5 rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#1D6070] aria-disabled:opacity-60 aria-disabled:cursor-not-allowed"
+          >
+            {enviando ? 'Creando cuenta…' : 'Crear cuenta'}
+          </button>
+
+          <p className="text-[#1D6070] text-[13px] font-medium">
+            ¿Ya tienes cuenta?{' '}
+            <Link to={RUTAS.login} className="text-[#1D6070] underline font-medium">
+              Inicia sesión
+            </Link>
+          </p>
+        </form>
+      )}
     </div>
   );
-};
-
-export default HU01RegistroDeCliente;
+}
