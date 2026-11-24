@@ -1,5 +1,6 @@
 package com.citas.app.CitasBack.security;
 
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
@@ -25,6 +26,31 @@ public class JwtService {
                 .setExpiration(new Date(System.currentTimeMillis() + jwtExpiration))
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)
                 .compact();
+    }
+
+    public String extractUsername(String token) {
+        return parseClaims(token).getSubject();
+    }
+
+    public boolean isValid(String token) {
+        try {
+            parseClaims(token);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public long getExpirationSeconds() {
+        return jwtExpiration / 1000;
+    }
+
+    private Claims parseClaims(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
     }
 
     private Key getSigningKey() {
