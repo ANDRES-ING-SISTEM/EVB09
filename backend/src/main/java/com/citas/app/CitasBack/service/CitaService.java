@@ -1,119 +1,158 @@
 package com.citas.app.CitasBack.service;
 
+import com.citas.app.CitasBack.dto.CitaVista;
+import com.citas.app.CitasBack.exception.ApiException;
 import com.citas.app.CitasBack.model.Cita;
+import com.citas.app.CitasBack.model.Disponibilidad;
+import com.citas.app.CitasBack.model.Especialidad;
 import com.citas.app.CitasBack.model.EstadoCita;
+import com.citas.app.CitasBack.model.ReprogramacionCita;
 import com.citas.app.CitasBack.model.Usuario;
 import com.citas.app.CitasBack.repository.CitaRepository;
+import com.citas.app.CitasBack.repository.DisponibilidadRepository;
 import com.citas.app.CitasBack.repository.EspecialidadRepository;
-import com.citas.app.CitasBack.repository.UsuarioRepository;
+import com.citas.app.CitasBack.repository.ReprogramacionCitaRepository;
 import com.citas.app.CitasBack.util.Reloj;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.NoSuchElementException;
+import java.util.Map;
 
+/**
+ * HU-12 a HU-15: solicitar, consultar, cancelar y reprogramar citas. El paciente SIEMPRE es el de
+ * la sesión: ninguna operación recibe un idUsuario del cliente.
+ */
 @Service
 public class CitaService {
 
     private final CitaRepository citaRepository;
-    private final UsuarioRepository usuarioRepository;
-    // Sprint 2: usados solo cuando la cita trae especialista / especialidad.
+    private final DisponibilidadRepository disponibilidadRepository;
     private final EspecialidadRepository especialidadRepository;
-    private final ReglasAgenda reglasAgenda;
+    private final ReprogramacionCitaRepository reprogramacionCitaRepository;
+
+    @Value("${citas.cancelacion.horas-minimas:24}")
+    private long horasMinimasCancelar;
+
+    @Value("${citas.reprogramacion.horas-minimas:24}")
+    private long horasMinimasReprogramar;
 
     public CitaService(CitaRepository citaRepository,
-                       UsuarioRepository usuarioRepository,
+                       DisponibilidadRepository disponibilidadRepository,
                        EspecialidadRepository especialidadRepository,
-                       ReglasAgenda reglasAgenda) {
+                       ReprogramacionCitaRepository reprogramacionCitaRepository) {
         this.citaRepository = citaRepository;
-        this.usuarioRepository = usuarioRepository;
+        this.disponibilidadRepository = disponibilidadRepository;
         this.especialidadRepository = especialidadRepository;
-        this.reglasAgenda = reglasAgenda;
+        this.reprogramacionCitaRepository = reprogramacionCitaRepository;
     }
 
-    // HU-12 (Sprint 1)
-    public Cita agendarCita(Cita cita, Long usuarioId) {
-        Usuario usuario = usuarioRepository.findById(usuarioId)
-                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+    @Transactional
+    public Map<String, Object> solicitar(Usuario paciente, Long idHorario, String motivo) {
+        Disponibilidad h = disponibilidadRepository.findByIdParaActualizar(idHorario)
+                .orElseThrow(() -> ApiException.noEncontrado("No existe el horario indicado."));
+        if (citaRepository.existsByUsuarioIdAndIdHorarioAndEstadoNot(paciente.getId(), idHorario, EstadoCita.CANCELADA)) {
+            throw ApiException.conflicto("Ya tienes una cita en este horario.");
+        }
+        exigirReservable(h);
 
-        cita.setUsuario(usuario);
-        cita.setEstado(EstadoCita.PENDIENTE);
-        validarAgendaDelEspecialista(cita);
-        return citaRepository.save(cita);
+        Especialidad esp = especialidadRepository
+                .findFirstByEspecialistaIdAndActivoTrueOrderByIdAsc(h.getEspecialista().getId()).orElse(null);
+
+        Cita c = new Cita();
+        c.setServicio(esp != null ? esp.getNombre() : "Consulta");
+        c.setFechaHora(h.getFecha().atTime(h.getHoraInicio()));
+        c.setEstado(EstadoCita.PENDIENTE);
+        c.setUsuario(paciente);
+        c.setEspecialista(h.getEspecialista());
+        c.setEspecialidad(esp);
+        c.setIdHorario(h.getId());
+        c.setMotivo(motivo == null || motivo.isBlank() ? null : motivo.trim());
+        c = citaRepository.save(c);
+        return CitaVista.creada(c);
     }
 
-    /**
-     * Sprint 2: si la cita se pide con un especialista, se respetan HU-10 y HU-11 (no se puede
-     * reservar un horario ocupado ni bloqueado). Si viene sin especialista (como en el Sprint 1),
-     * no se valida nada y todo funciona exactamente igual que antes.
-     */
-    private void validarAgendaDelEspecialista(Cita cita) {
-        if (cita.getEspecialista() == null) {
-            return;
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> listarDe(Long idUsuario) {
+        List<Map<String, Object>> salida = new ArrayList<>();
+        for (Cita c : citaRepository.findByUsuarioIdOrderByFechaHoraDesc(idUsuario)) {
+            salida.add(CitaVista.completa(c));
         }
-        Long idEspecialista = cita.getEspecialista().getId();
-        if (idEspecialista == null) {
-            throw new IllegalArgumentException("Debe indicar el id del especialista");
-        }
-        Usuario especialista = usuarioRepository.findById(idEspecialista)
-                .orElseThrow(() -> new NoSuchElementException(
-                        "No existe un especialista con id " + idEspecialista));
-        if (especialista.getRol() != Usuario.Rol.ESPECIALISTA) {
-            throw new IllegalArgumentException("El usuario indicado no es un especialista");
-        }
-        cita.setEspecialista(especialista);
-
-        if (cita.getEspecialidad() != null) {
-            Long idEspecialidad = cita.getEspecialidad().getId();
-            if (idEspecialidad == null) {
-                throw new IllegalArgumentException("Debe indicar el id de la especialidad");
-            }
-            cita.setEspecialidad(especialidadRepository.findById(idEspecialidad)
-                    .orElseThrow(() -> new NoSuchElementException(
-                            "No existe una especialidad con id " + idEspecialidad)));
-        }
-
-        LocalDateTime inicio = cita.getFechaHora();
-        if (inicio == null) {
-            throw new IllegalArgumentException("La fecha y hora de la cita son obligatorias");
-        }
-        if (!inicio.isAfter(Reloj.ahora())) {
-            throw new IllegalArgumentException("La fecha y hora de la cita deben ser posteriores al momento actual");
-        }
-        if (reglasAgenda.estaOcupado(idEspecialista, inicio)) {
-            throw new IllegalArgumentException("Ese horario ya está ocupado por otra cita");
-        }
-        if (reglasAgenda.estaBloqueado(idEspecialista, inicio)) {
-            throw new IllegalArgumentException("Ese horario está bloqueado por el especialista");
-        }
+        return salida;
     }
 
-    // HU-13 (Sprint 2): el controlador la convierte a CitaResponse. Más recientes primero.
-    public List<Cita> obtenerCitasPorUsuario(Long usuarioId) {
-        if (!usuarioRepository.existsById(usuarioId)) {
-            throw new NoSuchElementException("No existe un usuario con id " + usuarioId);
+    @Transactional
+    public void cancelar(Long idCita, Usuario paciente) {
+        Cita c = propia(idCita, paciente);
+        if (!EstadoCita.admiteCambios(c.getEstado())) {
+            throw ApiException.conflicto("Esta cita no puede cancelarse porque ya fue cancelada o ya ocurrió.");
         }
-        return citaRepository.findByUsuarioId(usuarioId).stream()
-                .sorted(Comparator.comparing(Cita::getFechaHora).reversed())
-                .toList();
+        if (Reloj.ahora().plusHours(horasMinimasCancelar).isAfter(c.getFechaHora())) {
+            throw ApiException.conflicto("Solo puedes cancelar con al menos " + horasMinimasCancelar
+                    + " horas de anticipación.");
+        }
+        c.setEstado(EstadoCita.CANCELADA);
+        c.setFechaCancelacion(Reloj.ahora());
+        citaRepository.save(c);
     }
 
-    public Cita actualizarCita(Long citaId, Cita nuevaCitaData) {
-        Cita citaExistente = citaRepository.findById(citaId)
-                .orElseThrow(() -> new RuntimeException("Cita no encontrada"));
+    @Transactional
+    public Map<String, Object> reprogramar(Long idCita, Long idHorarioNuevo, Usuario paciente) {
+        Cita c = propia(idCita, paciente);
+        if (!EstadoCita.admiteCambios(c.getEstado())) {
+            throw ApiException.conflicto("Esta cita no puede reprogramarse porque ya fue cancelada o ya ocurrió.");
+        }
+        if (Reloj.ahora().plusHours(horasMinimasReprogramar).isAfter(c.getFechaHora())) {
+            throw ApiException.conflicto("Solo puedes reprogramar con al menos " + horasMinimasReprogramar
+                    + " horas de anticipación.");
+        }
+        Disponibilidad nuevo = disponibilidadRepository.findByIdParaActualizar(idHorarioNuevo)
+                .orElseThrow(() -> ApiException.noEncontrado("No existe el horario indicado."));
+        if (idHorarioNuevo.equals(c.getIdHorario())) {
+            throw ApiException.campo("idHorario", "El nuevo horario es el mismo de tu cita actual.");
+        }
+        if (c.getEspecialista() != null && !nuevo.getEspecialista().getId().equals(c.getEspecialista().getId())) {
+            throw ApiException.campo("idHorario", "El nuevo horario debe ser del mismo especialista.");
+        }
+        exigirReservable(nuevo);
 
-        citaExistente.setServicio(nuevaCitaData.getServicio());
-        citaExistente.setFechaHora(nuevaCitaData.getFechaHora());
-        return citaRepository.save(citaExistente);
+        LocalDateTime anterior = c.getFechaHora();
+        LocalDateTime siguiente = nuevo.getFecha().atTime(nuevo.getHoraInicio());
+
+        ReprogramacionCita historial = new ReprogramacionCita();
+        historial.setCita(c);
+        historial.setFechaAnterior(anterior.toLocalDate());
+        historial.setHoraAnterior(anterior.toLocalTime());
+        historial.setFechaNueva(siguiente.toLocalDate());
+        historial.setHoraNueva(siguiente.toLocalTime());
+        historial.setFechaRegistro(Reloj.ahora());
+        reprogramacionCitaRepository.save(historial);
+
+        c.setFechaHora(siguiente);
+        c.setIdHorario(nuevo.getId());
+        c = citaRepository.save(c);
+        return CitaVista.creada(c);
     }
 
-    public void cancelarCita(Long citaId) {
-        Cita cita = citaRepository.findById(citaId)
-                .orElseThrow(() -> new RuntimeException("Cita no encontrada"));
+    /** Cita del paciente de la sesión. Si no existe o es de otra persona, responde 404 igual. */
+    private Cita propia(Long idCita, Usuario paciente) {
+        Cita c = citaRepository.findById(idCita)
+                .orElseThrow(() -> ApiException.noEncontrado("No existe una cita con id " + idCita));
+        if (c.getUsuario() == null || !c.getUsuario().getId().equals(paciente.getId())) {
+            throw ApiException.noEncontrado("No existe una cita con id " + idCita);
+        }
+        return c;
+    }
 
-        cita.setEstado(EstadoCita.CANCELADA);
-        citaRepository.save(cita);
+    private void exigirReservable(Disponibilidad h) {
+        boolean bloqueado = Boolean.FALSE.equals(h.getDisponible());
+        boolean pasado = !h.getFecha().atTime(h.getHoraInicio()).isAfter(Reloj.ahora());
+        boolean ocupado = citaRepository.existsByIdHorarioAndEstadoNot(h.getId(), EstadoCita.CANCELADA);
+        if (bloqueado || pasado || ocupado) {
+            throw ApiException.conflicto("El horario ya no está disponible.");
+        }
     }
 }

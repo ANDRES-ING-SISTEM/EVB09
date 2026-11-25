@@ -4,7 +4,6 @@ import com.citas.app.CitasBack.model.Usuario;
 import com.citas.app.CitasBack.repository.UsuarioRepository;
 import com.citas.app.CitasBack.security.JwtAuthFilter;
 import com.citas.app.CitasBack.security.JwtService;
-import com.citas.app.CitasBack.service.AuthService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -23,9 +22,6 @@ import java.util.Optional;
 public class AuthController {
 
     @Autowired
-    private AuthService authService;
-
-    @Autowired
     private UsuarioRepository usuarioRepository;
 
     @Autowired
@@ -33,11 +29,6 @@ public class AuthController {
 
     @Autowired
     private JwtService jwtService;
-
-    @PostMapping("/registro")
-    public ResponseEntity<Usuario> registrar(@RequestBody Usuario usuario) {
-        return ResponseEntity.ok(authService.registrar(usuario));
-    }
 
     // Acepta correo/contrasena (frontend Vitalis) y email/password (Postman de sprints anteriores).
     @PostMapping("/login")
@@ -86,3 +77,4 @@ public class AuthController {
                 .httpOnly(true).secure(true).sameSite("None").path("/").maxAge(duracion).build();
     }
 }
+

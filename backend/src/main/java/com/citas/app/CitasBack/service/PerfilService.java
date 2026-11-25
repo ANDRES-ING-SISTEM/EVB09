@@ -1,42 +1,41 @@
 package com.citas.app.CitasBack.service;
 
 import com.citas.app.CitasBack.dto.PerfilRequest;
+import com.citas.app.CitasBack.exception.ApiException;
 import com.citas.app.CitasBack.model.Usuario;
 import com.citas.app.CitasBack.repository.UsuarioRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.NoSuchElementException;
-
-/** HU-03: consultar y actualizar el perfil de un usuario. */
+/** HU-03: consultar y actualizar el perfil propio. */
 @Service
 public class PerfilService {
 
-    @Autowired
-    private UsuarioRepository usuarioRepository;
+    private final UsuarioRepository usuarioRepository;
 
+    public PerfilService(UsuarioRepository usuarioRepository) {
+        this.usuarioRepository = usuarioRepository;
+    }
+
+    @Transactional(readOnly = true)
     public Usuario consultar(Long id) {
         return usuarioRepository.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("No existe un usuario con id " + id));
+                .orElseThrow(() -> ApiException.noEncontrado("No existe un usuario con id " + id));
     }
 
     @Transactional
-    public Usuario actualizar(Long id, PerfilRequest request) {
-        Usuario usuario = consultar(id);
-        String email = request.getEmail().trim();
-
-        usuarioRepository.findByEmail(email)
+    public Usuario actualizar(Long id, PerfilRequest r) {
+        Usuario u = consultar(id);
+        String correo = r.getCorreo().trim();
+        usuarioRepository.findByEmail(correo)
                 .filter(otro -> !otro.getId().equals(id))
                 .ifPresent(otro -> {
-                    throw new IllegalArgumentException("Ya existe una cuenta registrada con ese correo");
+                    throw ApiException.campo("correo", "Ya existe una cuenta registrada con ese correo.");
                 });
-
-        usuario.setNombre(request.getNombre().trim());
-        usuario.setApellido(request.getApellido().trim());
-        usuario.setEmail(email);
-        usuario.setTelefono(request.getTelefono() == null || request.getTelefono().isBlank()
-                ? null : request.getTelefono().trim());
-        return usuarioRepository.save(usuario);
+        u.setNombre(r.getNombre().trim());
+        u.setApellido(r.getApellido().trim());
+        u.setEmail(correo);
+        u.setTelefono(r.getTelefono() == null || r.getTelefono().isBlank() ? null : r.getTelefono().trim());
+        return usuarioRepository.save(u);
     }
 }

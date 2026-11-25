@@ -1,45 +1,59 @@
 package com.citas.app.CitasBack.controller;
 
-import com.citas.app.CitasBack.dto.CitaResponse;
-import com.citas.app.CitasBack.model.Cita;
+import com.citas.app.CitasBack.dto.CitaRequest;
+import com.citas.app.CitasBack.dto.ReprogramarRequest;
+import com.citas.app.CitasBack.exception.ApiException;
+import com.citas.app.CitasBack.model.Usuario;
+import com.citas.app.CitasBack.security.SesionActual;
 import com.citas.app.CitasBack.service.CitaService;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
+/** HU-12 a HU-15. Solo pacientes; el usuario sale de la cookie, nunca de la URL ni del cuerpo. */
 @RestController
 @RequestMapping("/api/citas")
-@CrossOrigin(origins = "*")
 public class CitaController {
 
     private final CitaService citaService;
+    private final SesionActual sesionActual;
 
-    public CitaController(CitaService citaService) {
+    public CitaController(CitaService citaService, SesionActual sesionActual) {
         this.citaService = citaService;
+        this.sesionActual = sesionActual;
     }
 
-    @PostMapping("/agendar/{usuarioId}")
-    public ResponseEntity<Cita> agendarCita(@RequestBody Cita cita, @PathVariable Long usuarioId) {
-        return ResponseEntity.ok(citaService.agendarCita(cita, usuarioId));
+    @PostMapping
+    public ResponseEntity<Map<String, Object>> solicitar(@Valid @RequestBody CitaRequest request) {
+        Usuario paciente = sesionActual.exigirRol(Usuario.Rol.PACIENTE);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(citaService.solicitar(paciente, request.getIdHorario(), request.getMotivo()));
     }
 
-    @GetMapping("/usuario/{usuarioId}")
-    public ResponseEntity<List<CitaResponse>> listarPorUsuario(@PathVariable Long usuarioId) {
-        // Sprint 2 (HU-13): se devuelve CitaResponse (incluye todos los campos del Sprint 1 + especialidad,
-        // especialista, fecha y hora) y ya no se expone el objeto Usuario completo.
-        return ResponseEntity.ok(citaService.obtenerCitasPorUsuario(usuarioId).stream()
-                .map(CitaResponse::new).toList());
+    @GetMapping("/usuario/{idUsuario}")
+    public List<Map<String, Object>> misCitas(@PathVariable Long idUsuario) {
+        Usuario paciente = sesionActual.exigirRol(Usuario.Rol.PACIENTE);
+        if (!paciente.getId().equals(idUsuario)) {
+            throw ApiException.prohibido();
+        }
+        return citaService.listarDe(idUsuario);
     }
 
-    @PutMapping("/actualizar/{citaId}")
-    public ResponseEntity<Cita> actualizarCita(@PathVariable Long citaId, @RequestBody Cita cita) {
-        return ResponseEntity.ok(citaService.actualizarCita(citaId, cita));
-    }
-
-    @DeleteMapping("/cancelar/{citaId}")
-    public ResponseEntity<Void> cancelarCita(@PathVariable Long citaId) {
-        citaService.cancelarCita(citaId);
+    @PutMapping("/{idCita}/cancelar")
+    public ResponseEntity<Void> cancelar(@PathVariable Long idCita) {
+        Usuario paciente = sesionActual.exigirRol(Usuario.Rol.PACIENTE);
+        citaService.cancelar(idCita, paciente);
         return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/{idCita}/reprogramar")
+    public Map<String, Object> reprogramar(@PathVariable Long idCita,
+                                           @Valid @RequestBody ReprogramarRequest request) {
+        Usuario paciente = sesionActual.exigirRol(Usuario.Rol.PACIENTE);
+        return citaService.reprogramar(idCita, request.getIdHorario(), paciente);
     }
 }

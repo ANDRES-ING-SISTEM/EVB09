@@ -33,6 +33,14 @@ public class Cita {
     @JoinColumn(name = "especialidad_id")
     private Especialidad especialidad;
 
+    // Horario (Disponibilidad) que reservó la cita. Se guarda como id, sin relación JPA.
+    @Column(name = "id_horario")
+    private Long idHorario;
+
+    // Motivo de la consulta que escribe el paciente al agendar (opcional).
+    @Column(length = 200)
+    private String motivo;
+
     @Column(length = 200)
     private String motivoCancelacion;
 
@@ -73,6 +81,10 @@ public class Cita {
     public Especialidad getEspecialidad() { return especialidad; }
     public void setEspecialidad(Especialidad especialidad) { this.especialidad = especialidad; }
 
+    public Long getIdHorario() { return idHorario; }
+    public void setIdHorario(Long idHorario) { this.idHorario = idHorario; }
+    public String getMotivo() { return motivo; }
+    public void setMotivo(String motivo) { this.motivo = motivo; }
     public String getMotivoCancelacion() { return motivoCancelacion; }
     public void setMotivoCancelacion(String motivoCancelacion) { this.motivoCancelacion = motivoCancelacion; }
 
@@ -82,3 +94,4 @@ public class Cita {
     public LocalDateTime getFechaCreacion() { return fechaCreacion; }
     public void setFechaCreacion(LocalDateTime fechaCreacion) { this.fechaCreacion = fechaCreacion; }
 }
+
