@@ -1,0 +1,1380 @@
+﻿=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\simulado\almacen.ts ===
+import type { Especialidad } from '../../types/especialidad';
+import type { Horario } from '../../types/horario';
+import type { Perfil } from '../../types/usuario';
+import type { Rol, Sesion } from '../../types/auth';
+
+// SOLO DESARROLLO (ver services/modo.ts): estado en memoria que imita al backend mientras
+// HU-02 y las historias de agenda y citas no estÃ¡n integradas. Se reinicia al recargar la
+// pÃ¡gina, salvo la sesiÃ³n.
+
+export const ESPECIALISTA_SIMULADO: Sesion = { idUsuario: 101, nombre: 'Carlos', rol: 'ROLE_ESPECIALISTA' };
+export const USUARIO_SIMULADO: Sesion = { idUsuario: 201, nombre: 'Ana', rol: 'ROLE_USUARIO' };
+export const ADMIN_SIMULADO: Sesion = { idUsuario: 1, nombre: 'Admin', rol: 'ROLE_ADMIN' };
+
+export function sesionPorCorreo(correo: string): Sesion {
+  const texto = correo.toLowerCase();
+  const rol: Rol = texto.includes('admin')
+    ? 'ROLE_ADMIN'
+    : texto.includes('especialista')
+      ? 'ROLE_ESPECIALISTA'
+      : 'ROLE_USUARIO';
+  return [ADMIN_SIMULADO, ESPECIALISTA_SIMULADO, USUARIO_SIMULADO].find((s) => s.rol === rol)!;
+}
+
+export const ESPECIALIDADES: Especialidad[] = [
+  {
+    idEspecialidad: 1,
+    nombreEspecialidad: 'CardiologÃ­a',
+    descripcion: 'DiagnÃ³stico y tratamiento de enfermedades del corazÃ³n y del sistema cardiovascular.',
+    duracionMinutos: 30,
+    especialista: { idUsuario: 101, nombre: 'Carlos', apellido: 'RamÃ­rez' },
+  },
+  {
+    idEspecialidad: 2,
+    nombreEspecialidad: 'DermatologÃ­a',
+    descripcion: 'Cuidado y tratamiento de la piel.',
+    duracionMinutos: 30,
+    especialista: { idUsuario: 102, nombre: 'Laura', apellido: 'GÃ³mez' },
+  },
+];
+
+export const PERFILES: Record<number, Perfil> = {
+  1: { idUsuario: 1, nombre: 'Admin', apellido: 'Vitalis', correo: 'admin@vitalis.com', telefono: null },
+  101: { idUsuario: 101, nombre: 'Carlos', apellido: 'RamÃ­rez', correo: 'especialista@vitalis.com', telefono: '3001112233' },
+  201: { idUsuario: 201, nombre: 'Ana', apellido: 'PÃ©rez', correo: 'ana.perez@correo.com', telefono: '3001234567' },
+  102: { idUsuario: 102, nombre: 'Laura', apellido: 'GÃ³mez', correo: 'laura.gomez@vitalis.com', telefono: '3009876543' },
+};
+
+// HU-20 y HU-21: quÃ© cuentas de PERFILES son especialistas, y su registro mÃ©dico
+export const ESPECIALISTAS_IDS = new Set<number>([101, 102]);
+export const REGISTROS_MEDICOS: Record<number, string> = { 101: 'RM-1001', 102: 'RM-1002' };
+
+export interface HorarioAlmacenado extends Horario {
+  idEspecialista: number;
+}
+
+export interface CitaAlmacenada {
+  idCita: number;
+  idHorario: number;
+  idUsuario: number;
+  estado: string;
+}
+
+function fechaEnDias(dias: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + dias);
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  return `${d.getFullYear()}-${mes}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export const horarios: HorarioAlmacenado[] = [
+  { idHorario: 1, idEspecialista: 101, fecha: fechaEnDias(1), horaInicio: '08:00', horaFin: '09:00', estado: 'RESERVADO' },
+  { idHorario: 2, idEspecialista: 101, fecha: fechaEnDias(1), horaInicio: '09:00', horaFin: '10:00', estado: 'LIBRE' },
+  { idHorario: 3, idEspecialista: 101, fecha: fechaEnDias(2), horaInicio: '14:00', horaFin: '15:00', estado: 'LIBRE' },
+  { idHorario: 4, idEspecialista: 101, fecha: fechaEnDias(3), horaInicio: '08:00', horaFin: '12:00', estado: 'LIBRE' },
+];
+
+// Ana ya tiene una cita (la del horario 1): sirve para ver HU-13, HU-14 y HU-15 sin crearla antes
+export const citas: CitaAlmacenada[] = [{ idCita: 1, idHorario: 1, idUsuario: 201, estado: 'PROGRAMADA' }];
+
+// Se crea al primer uso (no al cargar el mÃ³dulo) para que el bundler de producciÃ³n pueda descartar
+// todo este archivo cuando el modo simulado estÃ¡ apagado
+let correos: Set<string> | null = null;
+export function correosRegistrados(): Set<string> {
+  correos ??= new Set(Object.values(PERFILES).map((p) => p.correo.toLowerCase()));
+  return correos;
+}
+
+let siguienteHorario = 5;
+let siguienteCita = 2;
+let siguienteUsuario = 300;
+export const nuevoIdHorario = () => siguienteHorario++;
+export const nuevoIdCita = () => siguienteCita++;
+export const nuevoIdUsuario = () => siguienteUsuario++;
+
+/** El horario sin el dato interno del especialista dueÃ±o, tal como lo devolverÃ­a el backend */
+export function aHorarioPublico({ idEspecialista: _propietario, ...horario }: HorarioAlmacenado): Horario {
+  return horario;
+}
+
+/** Imita la latencia de red y respeta la cancelaciÃ³n de la peticiÃ³n */
+export function demora<T>(valor: T, signal?: AbortSignal, ms = 350): Promise<T> {
+  return new Promise<T>((resolver, rechazar) => {
+    const abortar = () => rechazar(new DOMException('Aborted', 'AbortError'));
+    if (signal?.aborted) return abortar();
+    const temporizador = setTimeout(() => resolver(valor), ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(temporizador);
+      abortar();
+    });
+  });
+}
+
+const CLAVE_SESION_SIMULADA = 'vitalis.simulado.sesion';
+
+export function leerSesionSimulada(): Sesion | null {
+  try {
+    const bruto = sessionStorage.getItem(CLAVE_SESION_SIMULADA);
+    return bruto ? (JSON.parse(bruto) as Sesion) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function guardarSesionSimulada(sesion: Sesion | null): void {
+  try {
+    if (sesion) sessionStorage.setItem(CLAVE_SESION_SIMULADA, JSON.stringify(sesion));
+    else sessionStorage.removeItem(CLAVE_SESION_SIMULADA);
+  } catch {
+    // sin almacenamiento la sesiÃ³n simulada dura hasta recargar
+  }
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\api.ts ===
+// Cliente HTTP central. Las pantallas no llaman a fetch: usan los servicios por dominio
+// (usuarios.service.ts, ...), que a su vez usan `request`.
+
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
+
+const MENSAJE_SIN_CONEXION =
+  'No pudimos conectar con el servidor. Revisa tu conexiÃ³n e intÃ©ntalo de nuevo.';
+const MENSAJE_SERVIDOR =
+  'El servicio no estÃ¡ disponible por ahora. IntÃ©ntalo de nuevo en unos minutos.';
+const MENSAJE_CAMPOS = 'Revisa los campos marcados e intÃ©ntalo de nuevo.';
+const MENSAJE_GENERICO = 'No pudimos completar la solicitud. IntÃ©ntalo de nuevo.';
+
+const MENSAJES_POR_ESTADO: Record<number, string> = {
+  400: 'Revisa los datos ingresados e intÃ©ntalo de nuevo.',
+  401: 'Tu sesiÃ³n no es vÃ¡lida o expirÃ³. Inicia sesiÃ³n de nuevo para continuar.',
+  403: 'No tienes permiso para realizar esta acciÃ³n.',
+  404: 'No encontramos lo que buscabas.',
+};
+
+/**
+ * Error de la API en un formato uniforme para las pantallas.
+ * - `message`: texto en lenguaje humano, listo para mostrar.
+ * - `fieldErrors`: errores por campo cuando el backend responde `{ campo: "mensaje" }`.
+ * - `status`: cÃ³digo HTTP (0 si no hubo respuesta, por ejemplo sin conexiÃ³n).
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly fieldErrors: Record<string, string>;
+
+  constructor(status: number, message: string, fieldErrors: Record<string, string> = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.fieldErrors = fieldErrors;
+  }
+}
+
+interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  body?: unknown;
+  signal?: AbortSignal;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// El backend responde de dos formas: un mapa { campo: mensaje } (validaciÃ³n de DTO)
+// o un texto plano con la regla de negocio incumplida. AquÃ­ se reconocen ambas.
+function interpretarCuerpo(raw: string): { message?: string; fieldErrors?: Record<string, string> } {
+  const text = raw.trim();
+  if (!text) return {};
+
+  try {
+    const data: unknown = JSON.parse(text);
+    if (typeof data === 'string') return { message: data };
+    if (isRecord(data)) {
+      const claves = Object.keys(data);
+      if (claves.length === 1 && claves[0] === 'error' && typeof data.error === 'string') {
+        return { message: data.error };
+      }
+      if (claves.length > 0 && Object.values(data).every((valor) => typeof valor === 'string')) {
+        return { fieldErrors: data as Record<string, string> };
+      }
+    }
+    return {};
+  } catch {
+    // No es JSON: texto plano. Se descarta HTML (pÃ¡ginas de error de proxies) y textos largos.
+    if (text.startsWith('<') || text.length > 300) return {};
+    return { message: text };
+  }
+}
+
+async function construirError(response: Response): Promise<ApiError> {
+  const { status } = response;
+
+  // Nunca mostrar detalles tÃ©cnicos de errores del servidor
+  if (status >= 500) return new ApiError(status, MENSAJE_SERVIDOR);
+  // 401 y 403: mensaje genÃ©rico, sin revelar informaciÃ³n de la cuenta
+  if (status === 401 || status === 403) return new ApiError(status, MENSAJES_POR_ESTADO[status]);
+
+  const raw = await response.text().catch(() => '');
+  const { message, fieldErrors } = interpretarCuerpo(raw);
+
+  if (fieldErrors) return new ApiError(status, MENSAJE_CAMPOS, fieldErrors);
+  return new ApiError(status, message ?? MENSAJES_POR_ESTADO[status] ?? MENSAJE_GENERICO);
+}
+
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', body, signal } = options;
+
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  // Defensa contra CSRF: un formulario de otro sitio no puede aÃ±adir cabeceras propias, y el
+  // backend puede exigir esta en las peticiones que cambian datos (ver security.md).
+  if (method !== 'GET') headers['X-Requested-With'] = 'XMLHttpRequest';
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      // La sesiÃ³n es una cookie HttpOnly: el navegador la envÃ­a solo si se le pide (tambiÃ©n
+      // entre dominios, p. ej. dos servicios de Render, con CORS y `allowCredentials` en el backend)
+      credentials: 'include',
+      signal,
+    });
+  } catch (error) {
+    // Una peticiÃ³n cancelada no es un fallo: se deja pasar para que quien llama la ignore
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new ApiError(0, MENSAJE_SIN_CONEXION);
+  }
+
+  if (!response.ok) throw await construirError(response);
+  if (response.status === 204) return undefined as T;
+  // Un 202 u otro Ã©xito sin cuerpo (por ejemplo "te enviamos un correo", HU-05) no es JSON
+  const cuerpo = await response.text();
+  return (cuerpo ? JSON.parse(cuerpo) : undefined) as T;
+}
+
+/** Texto seguro para mostrar al usuario a partir de cualquier error capturado. */
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  return 'OcurriÃ³ un error inesperado. IntÃ©ntalo de nuevo.';
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\auth.service.ts ===
+import type {
+  LoginRequest,
+  LoginResponse,
+  RecuperacionRequest,
+  RestablecerContrasenaRequest,
+  Sesion,
+} from '../types/auth';
+import { ApiError, request } from './api';
+import { MODO_SIMULADO } from './modo';
+import { esSesion } from './sesion';
+import {
+  demora,
+  guardarSesionSimulada,
+  leerSesionSimulada,
+  sesionPorCorreo,
+} from './simulado/almacen';
+
+// El mensaje NO debe revelar si fallÃ³ el correo o la contraseÃ±a (HU-02, requisito no funcional)
+const MENSAJE_CREDENCIALES = 'Las credenciales ingresadas no son vÃ¡lidas.';
+// HU-23: tras 5 intentos fallidos seguidos el servidor bloquea la cuenta 15 minutos (423 o 429).
+// El aviso no dice si el correo existe: es el mismo para cualquier cuenta bloqueada.
+const MENSAJE_BLOQUEO =
+  'Por seguridad, el acceso estÃ¡ bloqueado temporalmente tras varios intentos fallidos. IntÃ©ntalo de nuevo en 15 minutos.';
+const MENSAJE_RESPUESTA =
+  'No pudimos iniciar tu sesiÃ³n porque el servicio respondiÃ³ de forma inesperada. IntÃ©ntalo de nuevo mÃ¡s tarde.';
+
+// HU-02 â€” POST /api/auth/login
+// 200 con { idUsuario, nombre, rol } y la cookie de sesiÃ³n en `Set-Cookie` (HttpOnly, Secure,
+// SameSite); 400 o 401 con credenciales invÃ¡lidas. El frontend nunca recibe el token.
+export async function iniciarSesion(data: LoginRequest, signal?: AbortSignal): Promise<LoginResponse> {
+  if (MODO_SIMULADO) {
+    const sesion = sesionPorCorreo(data.correo);
+    guardarSesionSimulada(sesion);
+    return demora(sesion, signal);
+  }
+
+  let respuesta: unknown;
+  try {
+    respuesta = await request<unknown>('/api/auth/login', { method: 'POST', body: data, signal });
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 423 || error.status === 429)) {
+      throw new ApiError(error.status, MENSAJE_BLOQUEO);
+    }
+    const credencialesInvalidas =
+      error instanceof ApiError &&
+      (error.status === 401 || (error.status === 400 && Object.keys(error.fieldErrors).length === 0));
+    if (credencialesInvalidas) throw new ApiError(error.status, MENSAJE_CREDENCIALES);
+    throw error;
+  }
+
+  if (!esSesion(respuesta)) throw new ApiError(502, MENSAJE_RESPUESTA);
+  return { idUsuario: respuesta.idUsuario, nombre: respuesta.nombre, rol: respuesta.rol };
+}
+
+// GET /api/auth/me â€” quiÃ©n es la persona dueÃ±a de la cookie de sesiÃ³n. Se usa al abrir o
+// recargar la aplicaciÃ³n: como la cookie es HttpOnly, el frontend no puede leerla por sÃ­ mismo.
+// Sin sesiÃ³n vÃ¡lida (401), sin conexiÃ³n o con una respuesta inesperada devuelve null.
+export async function obtenerSesionActual(signal?: AbortSignal): Promise<Sesion | null> {
+  if (MODO_SIMULADO) return demora(leerSesionSimulada(), signal, 100);
+
+  try {
+    const respuesta = await request<unknown>('/api/auth/me', { signal });
+    return esSesion(respuesta)
+      ? { idUsuario: respuesta.idUsuario, nombre: respuesta.nombre, rol: respuesta.rol }
+      : null;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    return null;
+  }
+}
+
+// HU-26 â€” POST /api/auth/logout: el backend invalida la sesiÃ³n y borra la cookie (204).
+// El frontend no puede borrar una cookie HttpOnly. Si la llamada falla, la persona ya saliÃ³ de la
+// interfaz; la cookie caduca por inactividad en el servidor (HU-25).
+export async function cerrarSesionEnServidor(): Promise<void> {
+  if (MODO_SIMULADO) {
+    guardarSesionSimulada(null);
+    return;
+  }
+  try {
+    await request<void>('/api/auth/logout', { method: 'POST' });
+  } catch {
+    // Se ignora a propÃ³sito: ver comentario arriba
+  }
+}
+
+const MENSAJE_ENLACE =
+  'El enlace de recuperaciÃ³n ya no es vÃ¡lido: expirÃ³ o ya se usÃ³. Solicita uno nuevo para continuar.';
+const MENSAJE_LIMITE =
+  'Hiciste varias solicitudes seguidas. Espera unos minutos antes de intentarlo de nuevo.';
+
+// HU-05 â€” POST /api/auth/recuperar-contrasena con { correo }. El servidor responde 202 o 204 igual
+// exista o no la cuenta, y envÃ­a al correo un enlace de un solo uso (30 minutos). AquÃ­ tampoco se
+// distingue: si el servidor llegara a responder 404 se trata como enviado, para no revelar quÃ©
+// correos estÃ¡n registrados (requisito no funcional de la HU).
+export async function solicitarRecuperacion(data: RecuperacionRequest, signal?: AbortSignal): Promise<void> {
+  if (MODO_SIMULADO) {
+    await demora(undefined, signal);
+    return;
+  }
+  try {
+    await request<void>('/api/auth/recuperar-contrasena', { method: 'POST', body: data, signal });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return;
+    if (error instanceof ApiError && error.status === 429) throw new ApiError(429, MENSAJE_LIMITE);
+    throw error;
+  }
+}
+
+// HU-05 â€” POST /api/auth/restablecer-contrasena con { token, contrasena, confirmarContrasena }.
+// 204 si se actualizÃ³ (el servidor invalida el enlace); 400 con { campo: mensaje } si la clave no
+// cumple las reglas; 400 con texto, 404 o 410 si el enlace expirÃ³, ya se usÃ³ o no existe. En modo
+// simulado el token "expirado" imita un enlace vencido.
+export async function restablecerContrasena(data: RestablecerContrasenaRequest, signal?: AbortSignal): Promise<void> {
+  if (MODO_SIMULADO) {
+    if (data.token === 'expirado') throw await demora(new ApiError(410, MENSAJE_ENLACE), signal);
+    await demora(undefined, signal);
+    return;
+  }
+  try {
+    await request<void>('/api/auth/restablecer-contrasena', { method: 'POST', body: data, signal });
+  } catch (error) {
+    if (!(error instanceof ApiError)) throw error;
+    const enlaceInvalido =
+      error.status === 404 ||
+      error.status === 410 ||
+      (error.status === 400 && Object.keys(error.fieldErrors).length === 0);
+    if (enlaceInvalido) throw new ApiError(410, MENSAJE_ENLACE);
+    throw error;
+  }
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\citas.service.ts ===
+import type { Cita, CitaCreada, CitaRequest, ReprogramarRequest } from '../types/cita';
+import { ApiError, request } from './api';
+import { MODO_SIMULADO } from './modo';
+import {
+  ESPECIALIDADES,
+  citas,
+  demora,
+  horarios,
+  leerSesionSimulada,
+  nuevoIdCita,
+  type CitaAlmacenada,
+} from './simulado/almacen';
+
+const MENSAJE_RESPUESTA =
+  'La cita pudo haberse registrado, pero el servicio respondiÃ³ de forma inesperada. Revisa tus citas antes de intentarlo otra vez.';
+const MENSAJE_LISTA =
+  'No pudimos cargar tus citas porque el servicio respondiÃ³ de forma inesperada. IntÃ©ntalo de nuevo mÃ¡s tarde.';
+const MENSAJE_SIN_SESION = 'Tu sesiÃ³n no es vÃ¡lida o expirÃ³. Inicia sesiÃ³n de nuevo para continuar.';
+const MENSAJE_NO_DISPONIBLE = 'El horario ya no estÃ¡ disponible.';
+const MENSAJE_NO_CANCELABLE = 'Esta cita no puede cancelarse porque ya fue cancelada, ya ocurriÃ³ o estÃ¡ fuera del periodo permitido.';
+
+function esObjeto(valor: unknown): valor is Record<string, unknown> {
+  return typeof valor === 'object' && valor !== null && !Array.isArray(valor);
+}
+const texto = (valor: unknown): string | null => (typeof valor === 'string' ? valor : null);
+const numero = (valor: unknown): number | null =>
+  typeof valor === 'number' && Number.isFinite(valor) ? valor : null;
+
+// La entidad Cita del backend trae tambiÃ©n datos del usuario y del especialista: aquÃ­ se copia
+// solo lo que la interfaz muestra y nada mÃ¡s se conserva en memoria.
+export function aCita(crudo: unknown): Cita | null {
+  if (!esObjeto(crudo)) return null;
+  const idCita = numero(crudo.idCita);
+  const fecha = texto(crudo.fechaCita) ?? texto(crudo.fecha);
+  const hora = texto(crudo.horaCita) ?? texto(crudo.horaInicio);
+  const especialidad = esObjeto(crudo.especialidad) ? crudo.especialidad : null;
+  const especialista = esObjeto(crudo.especialista) ? crudo.especialista : null;
+  const idEspecialidad = especialidad ? numero(especialidad.idEspecialidad) : null;
+  const nombreEspecialidad = especialidad ? texto(especialidad.nombreEspecialidad) : texto(crudo.especialidad);
+  if (idCita === null || !fecha || !hora || nombreEspecialidad === null) return null;
+
+  const nombre = especialista ? texto(especialista.nombre) : null;
+  const apellido = especialista ? texto(especialista.apellido) : null;
+  return {
+    idCita,
+    idEspecialidad: idEspecialidad ?? 0,
+    especialidad: nombreEspecialidad,
+    duracionMinutos: (especialidad ? numero(especialidad.duracionMinutos) : null) ?? 0,
+    idEspecialista: especialista ? numero(especialista.idUsuario) : null,
+    especialista: [nombre, apellido].filter(Boolean).join(' ') || 'Por asignar',
+    fecha: fecha.slice(0, 10),
+    hora: hora.slice(0, 5),
+    estado: texto(crudo.estado) ?? 'PROGRAMADA',
+  };
+}
+
+function aCitaCreada(crudo: unknown): CitaCreada | null {
+  if (!esObjeto(crudo)) return null;
+  const { idCita, especialidad, fecha, horaInicio } = crudo;
+  if (typeof idCita !== 'number' || typeof especialidad !== 'string' || typeof fecha !== 'string' || typeof horaInicio !== 'string') {
+    return null;
+  }
+  return {
+    idCita,
+    especialidad,
+    fecha: fecha.slice(0, 10),
+    horaInicio: horaInicio.slice(0, 5),
+    estado: typeof crudo.estado === 'string' ? crudo.estado : 'PENDIENTE',
+  };
+}
+
+function sesionSimulada() {
+  const sesion = leerSesionSimulada();
+  if (!sesion) throw new ApiError(401, MENSAJE_SIN_SESION);
+  return sesion;
+}
+
+function citaSimulada(almacenada: CitaAlmacenada): Cita {
+  const horario = horarios.find((h) => h.idHorario === almacenada.idHorario)!;
+  const especialidad = ESPECIALIDADES.find((e) => e.especialista?.idUsuario === horario.idEspecialista);
+  return {
+    idCita: almacenada.idCita,
+    idEspecialidad: especialidad?.idEspecialidad ?? 0,
+    especialidad: especialidad?.nombreEspecialidad ?? 'Consulta',
+    duracionMinutos: especialidad?.duracionMinutos ?? 30,
+    idEspecialista: horario.idEspecialista,
+    especialista: especialidad?.especialista ? `${especialidad.especialista.nombre} ${especialidad.especialista.apellido}` : 'Por asignar',
+    fecha: horario.fecha,
+    hora: horario.horaInicio,
+    estado: almacenada.estado,
+  };
+}
+
+function citaCreadaSimulada(almacenada: CitaAlmacenada): CitaCreada {
+  const cita = citaSimulada(almacenada);
+  return { idCita: cita.idCita, especialidad: cita.especialidad, fecha: cita.fecha, horaInicio: cita.hora, estado: almacenada.estado };
+}
+
+// HU-12 â€” POST /api/citas (ROLE_USUARIO). El backend toma el usuario de la sesiÃ³n.
+// 201 con la cita; 409 si el horario ya no estÃ¡ disponible o si el usuario ya tiene esa cita.
+export async function solicitarCita(data: CitaRequest, signal?: AbortSignal): Promise<CitaCreada> {
+  if (MODO_SIMULADO) {
+    const sesion = sesionSimulada();
+    const horario = horarios.find((h) => h.idHorario === data.idHorario);
+    if (horario && citas.some((c) => c.idHorario === horario.idHorario && c.idUsuario === sesion.idUsuario && c.estado !== 'CANCELADA')) {
+      throw await demora(new ApiError(409, 'Ya tienes una cita en este horario.'), signal);
+    }
+    if (!horario || horario.estado !== 'LIBRE') {
+      throw await demora(new ApiError(409, MENSAJE_NO_DISPONIBLE), signal);
+    }
+    horario.estado = 'RESERVADO';
+    const nueva: CitaAlmacenada = { idCita: nuevoIdCita(), idHorario: horario.idHorario, idUsuario: sesion.idUsuario, estado: 'PROGRAMADA' };
+    citas.push(nueva);
+    return demora(citaCreadaSimulada(nueva), signal);
+  }
+
+  const creada = aCitaCreada(await request<unknown>('/api/citas', { method: 'POST', body: data, signal }));
+  if (!creada) throw new ApiError(502, MENSAJE_RESPUESTA);
+  return creada;
+}
+
+// HU-13 â€” GET /api/citas/usuario/{idUsuario}. Lista vacÃ­a si no tiene citas. El backend debe
+// devolver solo las de la persona de la sesiÃ³n (403 si el id es de otra).
+export async function listarMisCitas(idUsuario: number, signal?: AbortSignal): Promise<Cita[]> {
+  if (MODO_SIMULADO) {
+    return demora(citas.filter((c) => c.idUsuario === idUsuario).map(citaSimulada), signal);
+  }
+  const crudo = await request<unknown>(`/api/citas/usuario/${idUsuario}`, { signal });
+  if (!Array.isArray(crudo)) throw new ApiError(502, MENSAJE_LISTA);
+  return crudo.map(aCita).filter((c): c is Cita => c !== null);
+}
+
+// HU-14 â€” PUT /api/citas/{id}/cancelar (ROLE_USUARIO, solo el dueÃ±o de la cita).
+// Libera el horario. 409 si ya estÃ¡ cancelada, ya ocurriÃ³ o estÃ¡ fuera del periodo permitido.
+export async function cancelarCita(idCita: number, signal?: AbortSignal): Promise<void> {
+  if (MODO_SIMULADO) {
+    const sesion = sesionSimulada();
+    const cita = citas.find((c) => c.idCita === idCita && c.idUsuario === sesion.idUsuario);
+    const horario = cita && horarios.find((h) => h.idHorario === cita.idHorario);
+    if (!cita || !horario) throw await demora(new ApiError(404, 'No encontramos lo que buscabas.'), signal);
+    if (cita.estado === 'CANCELADA' || cita.estado === 'COMPLETADA') {
+      throw await demora(new ApiError(409, MENSAJE_NO_CANCELABLE), signal);
+    }
+    cita.estado = 'CANCELADA';
+    horario.estado = 'LIBRE';
+    await demora(undefined, signal);
+    return;
+  }
+  await request<unknown>(`/api/citas/${idCita}/cancelar`, { method: 'PUT', signal });
+}
+
+// HU-15 â€” PUT /api/citas/{id}/reprogramar con { idHorario } (ROLE_USUARIO, solo el dueÃ±o).
+// Actualiza la cita y libera el horario anterior en una sola operaciÃ³n; si falla, la cita original
+// queda igual. 409 si el nuevo horario ya no estÃ¡ disponible.
+export async function reprogramarCita(idCita: number, data: ReprogramarRequest, signal?: AbortSignal): Promise<CitaCreada> {
+  if (MODO_SIMULADO) {
+    const sesion = sesionSimulada();
+    const cita = citas.find((c) => c.idCita === idCita && c.idUsuario === sesion.idUsuario);
+    const anterior = cita && horarios.find((h) => h.idHorario === cita.idHorario);
+    if (!cita || !anterior) throw await demora(new ApiError(404, 'No encontramos lo que buscabas.'), signal);
+    const nuevo = horarios.find((h) => h.idHorario === data.idHorario);
+    if (!nuevo || nuevo.estado !== 'LIBRE') throw await demora(new ApiError(409, MENSAJE_NO_DISPONIBLE), signal);
+    anterior.estado = 'LIBRE';
+    nuevo.estado = 'RESERVADO';
+    cita.idHorario = nuevo.idHorario;
+    cita.estado = 'REPROGRAMADA';
+    return demora(citaCreadaSimulada(cita), signal);
+  }
+
+  const reprogramada = aCitaCreada(await request<unknown>(`/api/citas/${idCita}/reprogramar`, { method: 'PUT', body: data, signal }));
+  if (!reprogramada) throw new ApiError(502, MENSAJE_RESPUESTA);
+  return reprogramada;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\especialidades.service.ts ===
+import type { Especialidad, EspecialidadRequest, EspecialidadUpdate } from '../types/especialidad';
+import { ApiError, request } from './api';
+import { MODO_SIMULADO } from './modo';
+import { ESPECIALIDADES, PERFILES, demora, leerSesionSimulada } from './simulado/almacen';
+
+const MENSAJE_LISTA =
+  'No pudimos cargar las especialidades porque el servicio respondiÃ³ de forma inesperada. IntÃ©ntalo de nuevo mÃ¡s tarde.';
+const MENSAJE_REGISTRO =
+  'La especialidad pudo haberse guardado, pero el servicio respondiÃ³ de forma inesperada. Revisa la lista de especialidades.';
+const MENSAJE_NO_ESPECIALISTA =
+  'Tu cuenta no estÃ¡ registrada como especialista. Contacta a un administrador.';
+
+function esObjeto(valor: unknown): valor is Record<string, unknown> {
+  return typeof valor === 'object' && valor !== null && !Array.isArray(valor);
+}
+const texto = (valor: unknown): string | null => (typeof valor === 'string' ? valor : null);
+const numero = (valor: unknown): number | null =>
+  typeof valor === 'number' && Number.isFinite(valor) ? valor : null;
+
+// Se copian solo los campos que la interfaz muestra. Hoy el backend responde con la entidad
+// completa (el especialista incluye datos de su cuenta): nada de eso se conserva en memoria.
+export function aEspecialidad(crudo: unknown): Especialidad | null {
+  if (!esObjeto(crudo)) return null;
+  const idEspecialidad = numero(crudo.idEspecialidad);
+  const nombreEspecialidad = texto(crudo.nombreEspecialidad);
+  if (idEspecialidad === null || nombreEspecialidad === null) return null;
+
+  const crudoEspecialista = esObjeto(crudo.especialista) ? crudo.especialista : null;
+  const idUsuario = crudoEspecialista ? numero(crudoEspecialista.idUsuario) : null;
+  const nombre = crudoEspecialista ? texto(crudoEspecialista.nombre) : null;
+  const apellido = crudoEspecialista ? texto(crudoEspecialista.apellido) : null;
+
+  return {
+    idEspecialidad,
+    nombreEspecialidad,
+    descripcion: texto(crudo.descripcion) ?? '',
+    duracionMinutos: numero(crudo.duracionMinutos) ?? 0,
+    especialista:
+      idUsuario !== null && nombre !== null ? { idUsuario, nombre, apellido: apellido ?? '' } : null,
+  };
+}
+
+// HU-08 â€” GET /api/especialidades (pÃºblico)
+export async function listarEspecialidades(signal?: AbortSignal): Promise<Especialidad[]> {
+  if (MODO_SIMULADO) return demora(ESPECIALIDADES, signal);
+
+  const crudo = await request<unknown>('/api/especialidades', { signal });
+  if (!Array.isArray(crudo)) throw new ApiError(502, MENSAJE_LISTA);
+  return crudo.map(aEspecialidad).filter((e): e is Especialidad => e !== null);
+}
+
+// HU-06 â€” POST /api/especialidades (requiere la sesiÃ³n de un especialista; viaja en la cookie)
+export async function registrarEspecialidad(data: EspecialidadRequest, signal?: AbortSignal): Promise<Especialidad> {
+  if (MODO_SIMULADO) {
+    const sesion = leerSesionSimulada();
+    const perfil = sesion && PERFILES[sesion.idUsuario];
+    const nueva: Especialidad = {
+      idEspecialidad: Math.max(0, ...ESPECIALIDADES.map((e) => e.idEspecialidad)) + 1,
+      nombreEspecialidad: data.nombreEspecialidad,
+      descripcion: data.descripcion,
+      duracionMinutos: data.duracionMinutos,
+      especialista: perfil ? { idUsuario: perfil.idUsuario, nombre: perfil.nombre, apellido: perfil.apellido } : null,
+    };
+    ESPECIALIDADES.push(nueva);
+    return demora({ ...nueva }, signal);
+  }
+  try {
+    const crudo = await request<unknown>('/api/especialidades', { method: 'POST', body: data, signal });
+    const creada = aEspecialidad(crudo);
+    if (!creada) throw new ApiError(502, MENSAJE_REGISTRO);
+    return creada;
+  } catch (error) {
+    // El backend responde 404 cuando el idEspecialista no corresponde a un especialista
+    if (error instanceof ApiError && error.status === 404) throw new ApiError(404, MENSAJE_NO_ESPECIALISTA);
+    throw error;
+  }
+}
+
+const MENSAJE_EDICION =
+  'Los cambios pudieron haberse guardado, pero el servicio respondiÃ³ de forma inesperada. Revisa la lista de especialidades.';
+
+// HU-07 â€” PUT /api/especialidades/{id} (ROLE_ESPECIALISTA, solo sus propias especialidades).
+// 200 con la especialidad; 400 { campo: mensaje }; 403 si no es suya. Las citas ya confirmadas no
+// se alteran aunque cambie la duraciÃ³n.
+export async function actualizarEspecialidad(
+  idEspecialidad: number,
+  data: EspecialidadUpdate,
+  signal?: AbortSignal,
+): Promise<Especialidad> {
+  if (MODO_SIMULADO) {
+    const sesion = leerSesionSimulada();
+    const existente = ESPECIALIDADES.find((e) => e.idEspecialidad === idEspecialidad);
+    if (!existente || existente.especialista?.idUsuario !== sesion?.idUsuario) {
+      throw await demora(new ApiError(403, 'No tienes permiso para realizar esta acciÃ³n.'), signal);
+    }
+    Object.assign(existente, data);
+    return demora({ ...existente }, signal);
+  }
+  const editada = aEspecialidad(await request<unknown>(`/api/especialidades/${idEspecialidad}`, { method: 'PUT', body: data, signal }));
+  if (!editada) throw new ApiError(502, MENSAJE_EDICION);
+  return editada;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\especialistas.service.ts ===
+import type { Especialista, EspecialistaUpdate } from '../types/especialista';
+import { ApiError, request } from './api';
+import { MODO_SIMULADO } from './modo';
+import {
+  ESPECIALIDADES,
+  ESPECIALISTAS_IDS,
+  PERFILES,
+  REGISTROS_MEDICOS,
+  correosRegistrados,
+  demora,
+  leerSesionSimulada,
+} from './simulado/almacen';
+
+const MENSAJE_LISTA =
+  'No pudimos cargar los especialistas porque el servicio respondiÃ³ de forma inesperada. IntÃ©ntalo de nuevo mÃ¡s tarde.';
+const MENSAJE_EDICION =
+  'Los cambios pudieron haberse guardado, pero el servicio respondiÃ³ de forma inesperada. Revisa la lista de especialistas.';
+const MENSAJE_CORREO_DUPLICADO = 'Ya existe una cuenta registrada con ese correo';
+const MENSAJE_SIN_PERMISO = 'No tienes permiso para realizar esta acciÃ³n.';
+
+function esObjeto(valor: unknown): valor is Record<string, unknown> {
+  return typeof valor === 'object' && valor !== null && !Array.isArray(valor);
+}
+const texto = (valor: unknown): string | null => (typeof valor === 'string' && valor ? valor : null);
+const numero = (valor: unknown): number | null =>
+  typeof valor === 'number' && Number.isFinite(valor) ? valor : null;
+
+// Se copian solo los campos que la interfaz muestra (el backend nunca debe enviar el hash de la
+// contraseÃ±a). Las especialidades llegan como objetos { idEspecialidad, nombreEspecialidad }.
+export function aEspecialista(crudo: unknown): Especialista | null {
+  if (!esObjeto(crudo)) return null;
+  const idUsuario = numero(crudo.idUsuario);
+  const nombre = texto(crudo.nombre);
+  const correo = texto(crudo.correo);
+  if (idUsuario === null || nombre === null || correo === null) return null;
+
+  const especialidades = Array.isArray(crudo.especialidades)
+    ? crudo.especialidades.flatMap((e) => {
+        if (!esObjeto(e)) return [];
+        const idEspecialidad = numero(e.idEspecialidad);
+        const nombreEspecialidad = texto(e.nombreEspecialidad);
+        return idEspecialidad !== null && nombreEspecialidad !== null ? [{ idEspecialidad, nombreEspecialidad }] : [];
+      })
+    : [];
+
+  return {
+    idUsuario,
+    nombre,
+    apellido: texto(crudo.apellido) ?? '',
+    correo,
+    telefono: texto(crudo.telefono),
+    registroMedico: texto(crudo.registroMedico),
+    especialidades,
+  };
+}
+
+function especialistaSimulado(idUsuario: number): Especialista | null {
+  const perfil = PERFILES[idUsuario];
+  if (!perfil || !ESPECIALISTAS_IDS.has(idUsuario)) return null;
+  return {
+    ...perfil,
+    registroMedico: REGISTROS_MEDICOS[idUsuario] ?? null,
+    especialidades: ESPECIALIDADES.filter((e) => e.especialista?.idUsuario === idUsuario).map((e) => ({
+      idEspecialidad: e.idEspecialidad,
+      nombreEspecialidad: e.nombreEspecialidad,
+    })),
+  };
+}
+
+// HU-20 y HU-21 â€” GET /api/especialistas: especialistas activos con sus especialidades. Lo usan
+// los pacientes (HU-20) y el administrador (HU-21).
+export async function listarEspecialistas(signal?: AbortSignal): Promise<Especialista[]> {
+  if (MODO_SIMULADO) {
+    const lista = [...ESPECIALISTAS_IDS].map(especialistaSimulado).filter((e): e is Especialista => e !== null);
+    return demora(lista, signal);
+  }
+  const crudo = await request<unknown>('/api/especialistas', { signal });
+  if (!Array.isArray(crudo)) throw new ApiError(502, MENSAJE_LISTA);
+  return crudo.map(aEspecialista).filter((e): e is Especialista => e !== null);
+}
+
+// HU-20 â€” GET /api/especialistas/{id}: perfil de un especialista (404 si no existe o no estÃ¡ activo)
+export async function obtenerEspecialista(idEspecialista: number, signal?: AbortSignal): Promise<Especialista> {
+  if (MODO_SIMULADO) {
+    const encontrado = especialistaSimulado(idEspecialista);
+    if (!encontrado) throw await demora(new ApiError(404, 'No encontramos lo que buscabas.'), signal);
+    return demora(encontrado, signal);
+  }
+  const especialista = aEspecialista(await request<unknown>(`/api/especialistas/${idEspecialista}`, { signal }));
+  if (!especialista) throw new ApiError(502, MENSAJE_LISTA);
+  return especialista;
+}
+
+// HU-21 â€” PUT /api/especialistas/{id} (solo ROLE_ADMIN). 200 con el especialista; 400 con
+// { campo: mensaje } si faltan datos o tienen mal formato; 409 (o 400 con texto) si el correo ya
+// pertenece a otra cuenta. El cambio se ve de inmediato en toda la plataforma.
+export async function actualizarEspecialista(
+  idEspecialista: number,
+  data: EspecialistaUpdate,
+  signal?: AbortSignal,
+): Promise<Especialista> {
+  if (MODO_SIMULADO) {
+    if (leerSesionSimulada()?.rol !== 'ROLE_ADMIN') throw await demora(new ApiError(403, MENSAJE_SIN_PERMISO), signal);
+    const actual = especialistaSimulado(idEspecialista);
+    if (!actual) throw await demora(new ApiError(404, 'No encontramos lo que buscabas.'), signal);
+
+    const correo = data.correo.toLowerCase();
+    if (correo !== actual.correo.toLowerCase() && correosRegistrados().has(correo)) {
+      throw await demora(new ApiError(409, MENSAJE_CORREO_DUPLICADO), signal);
+    }
+    correosRegistrados().delete(actual.correo.toLowerCase());
+    correosRegistrados().add(correo);
+    PERFILES[idEspecialista] = {
+      idUsuario: idEspecialista,
+      nombre: data.nombre,
+      apellido: data.apellido,
+      correo: data.correo,
+      telefono: data.telefono ?? null,
+    };
+    if (data.registroMedico) REGISTROS_MEDICOS[idEspecialista] = data.registroMedico;
+    else delete REGISTROS_MEDICOS[idEspecialista];
+    // El nombre tambiÃ©n se ve en las especialidades que atiende
+    for (const e of ESPECIALIDADES) {
+      if (e.especialista?.idUsuario === idEspecialista) {
+        e.especialista = { idUsuario: idEspecialista, nombre: data.nombre, apellido: data.apellido };
+      }
+    }
+    return demora(especialistaSimulado(idEspecialista)!, signal);
+  }
+  const editado = aEspecialista(await request<unknown>(`/api/especialistas/${idEspecialista}`, { method: 'PUT', body: data, signal }));
+  if (!editado) throw new ApiError(502, MENSAJE_EDICION);
+  return editado;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\horarios.service.ts ===
+import type { EstadoHorario, Horario, HorarioRequest } from '../types/horario';
+import { ApiError, request } from './api';
+import { MODO_SIMULADO } from './modo';
+import {
+  aHorarioPublico,
+  demora,
+  horarios,
+  leerSesionSimulada,
+  nuevoIdHorario,
+} from './simulado/almacen';
+
+const MENSAJE_LISTA =
+  'No pudimos cargar los horarios porque el servicio respondiÃ³ de forma inesperada. IntÃ©ntalo de nuevo mÃ¡s tarde.';
+const MENSAJE_REGISTRO =
+  'El horario pudo haberse guardado, pero el servicio respondiÃ³ de forma inesperada. Revisa tu agenda.';
+const MENSAJE_SUPERPUESTO = 'Ya existe un horario que se superpone con ese rango.';
+const MENSAJE_SIN_SESION = 'Tu sesiÃ³n no es vÃ¡lida o expirÃ³. Inicia sesiÃ³n de nuevo para continuar.';
+const MENSAJE_CON_CITA =
+  'Este horario tiene una cita reservada. CancÃ©lala o reprogrÃ¡mala antes de bloquearlo.';
+
+/** El horario por el que se pregunta: la especialidad, y su especialista si ya se conoce */
+export interface ReferenciaEspecialidad {
+  idEspecialidad: number;
+  idEspecialista: number | null;
+}
+
+function esObjeto(valor: unknown): valor is Record<string, unknown> {
+  return typeof valor === 'object' && valor !== null && !Array.isArray(valor);
+}
+
+// El backend serializa LocalTime como "08:00" o "08:00:00": la interfaz trabaja con HH:mm
+function normalizarHora(valor: unknown): string | null {
+  return typeof valor === 'string' && /^\d{2}:\d{2}/.test(valor) ? valor.slice(0, 5) : null;
+}
+
+function normalizarEstado(crudo: Record<string, unknown>): EstadoHorario {
+  const { estado, disponible } = crudo;
+  if (estado === 'LIBRE' || estado === 'RESERVADO' || estado === 'BLOQUEADO') return estado;
+  // Respuesta con solo `disponible`: lo no disponible se trata como reservado (no se ofrece)
+  return disponible === false ? 'RESERVADO' : 'LIBRE';
+}
+
+export function aHorario(crudo: unknown): Horario | null {
+  if (!esObjeto(crudo)) return null;
+  const { idHorario, fecha } = crudo;
+  const horaInicio = normalizarHora(crudo.horaInicio);
+  const horaFin = normalizarHora(crudo.horaFin);
+  if (typeof idHorario !== 'number' || typeof fecha !== 'string' || !horaInicio || !horaFin) return null;
+  return { idHorario, fecha: fecha.slice(0, 10), horaInicio, horaFin, estado: normalizarEstado(crudo) };
+}
+
+function aListaDeHorarios(crudo: unknown): Horario[] {
+  if (!Array.isArray(crudo)) throw new ApiError(502, MENSAJE_LISTA);
+  return crudo.map(aHorario).filter((h): h is Horario => h !== null);
+}
+
+const seSuperponen = (a: { horaInicio: string; horaFin: string }, b: { horaInicio: string; horaFin: string }) =>
+  a.horaInicio < b.horaFin && b.horaInicio < a.horaFin;
+
+function sesionSimulada() {
+  const sesion = leerSesionSimulada();
+  if (!sesion) throw new ApiError(401, MENSAJE_SIN_SESION);
+  return sesion;
+}
+
+// HU-09 â€” GET /api/horarios/especialista/{idEspecialista}: la agenda de un especialista
+export async function listarHorariosDeEspecialista(idEspecialista: number, signal?: AbortSignal): Promise<Horario[]> {
+  if (MODO_SIMULADO) {
+    return demora(horarios.filter((h) => h.idEspecialista === idEspecialista).map(aHorarioPublico), signal);
+  }
+  return aListaDeHorarios(await request<unknown>(`/api/horarios/especialista/${idEspecialista}`, { signal }));
+}
+
+// HU-09 â€” POST /api/horarios (ROLE_ESPECIALISTA). El backend toma el especialista de la sesiÃ³n.
+// 201 con el horario; 400 { campo: mensaje }; 409 si se superpone con otro de la misma fecha.
+export async function crearHorario(data: HorarioRequest, signal?: AbortSignal): Promise<Horario> {
+  if (MODO_SIMULADO) {
+    const sesion = sesionSimulada();
+    const choca = horarios.some((h) => h.idEspecialista === sesion.idUsuario && h.fecha === data.fecha && seSuperponen(h, data));
+    if (choca) throw await demora(new ApiError(409, MENSAJE_SUPERPUESTO), signal);
+    const nuevo = { idHorario: nuevoIdHorario(), idEspecialista: sesion.idUsuario, ...data, estado: 'LIBRE' as const };
+    horarios.push(nuevo);
+    return demora(aHorarioPublico(nuevo), signal);
+  }
+
+  const creado = aHorario(await request<unknown>('/api/horarios', { method: 'POST', body: data, signal }));
+  if (!creado) throw new ApiError(502, MENSAJE_REGISTRO);
+  return creado;
+}
+
+// HU-10 y HU-12 â€” GET /api/horarios/disponibles?idEspecialidad=â€¦&fecha=â€¦: horarios libres del
+// especialista de esa especialidad, y de una fecha concreta si se indica (AAAA-MM-DD). Nunca
+// devuelve horarios reservados ni bloqueados. En modo simulado se necesita el especialista.
+export async function listarHorariosDisponibles(
+  referencia: ReferenciaEspecialidad,
+  signal?: AbortSignal,
+  fecha?: string,
+): Promise<Horario[]> {
+  if (MODO_SIMULADO) {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const libres = horarios
+      .filter(
+        (h) =>
+          h.idEspecialista === referencia.idEspecialista &&
+          h.estado === 'LIBRE' &&
+          h.fecha >= hoy &&
+          (!fecha || h.fecha === fecha),
+      )
+      .map(aHorarioPublico);
+    return demora(libres, signal);
+  }
+  const consulta = new URLSearchParams({ idEspecialidad: String(referencia.idEspecialidad) });
+  if (fecha) consulta.set('fecha', fecha);
+  return aListaDeHorarios(await request<unknown>(`/api/horarios/disponibles?${consulta}`, { signal }));
+}
+
+async function cambiarBloqueo(idHorario: number, accion: 'bloquear' | 'desbloquear', signal?: AbortSignal): Promise<Horario> {
+  if (MODO_SIMULADO) {
+    const sesion = sesionSimulada();
+    const horario = horarios.find((h) => h.idHorario === idHorario);
+    if (!horario || horario.idEspecialista !== sesion.idUsuario) {
+      throw await demora(new ApiError(403, 'No tienes permiso para realizar esta acciÃ³n.'), signal);
+    }
+    if (accion === 'bloquear' && horario.estado === 'RESERVADO') {
+      throw await demora(new ApiError(409, MENSAJE_CON_CITA), signal);
+    }
+    if (accion === 'bloquear' && horario.estado === 'LIBRE') horario.estado = 'BLOQUEADO';
+    if (accion === 'desbloquear' && horario.estado === 'BLOQUEADO') horario.estado = 'LIBRE';
+    return demora(aHorarioPublico(horario), signal);
+  }
+
+  const actualizado = aHorario(await request<unknown>(`/api/horarios/${idHorario}/${accion}`, { method: 'PUT', signal }));
+  if (!actualizado) throw new ApiError(502, MENSAJE_LISTA);
+  return actualizado;
+}
+
+// HU-11 â€” PUT /api/horarios/{id}/bloquear (ROLE_ESPECIALISTA, solo su agenda).
+// 200 con el horario; 409 si tiene una cita reservada; 403 si no es su horario.
+export function bloquearHorario(idHorario: number, signal?: AbortSignal): Promise<Horario> {
+  return cambiarBloqueo(idHorario, 'bloquear', signal);
+}
+
+// HU-11 â€” PUT /api/horarios/{id}/desbloquear: el horario vuelve a ofrecerse a los pacientes
+export function desbloquearHorario(idHorario: number, signal?: AbortSignal): Promise<Horario> {
+  return cambiarBloqueo(idHorario, 'desbloquear', signal);
+}
+
+const MENSAJE_MODIFICAR_CON_CITA =
+  'Este horario tiene citas futuras reservadas. PodrÃ¡s modificarlo cuando esas citas se cancelen o se reprogramen.';
+
+// HU-22 â€” PUT /api/horarios/{id} con { fecha, horaInicio, horaFin } (ROLE_ESPECIALISTA, solo su
+// agenda). 200 con el horario actualizado, que se refleja de inmediato en la disponibilidad;
+// 400 { campo: mensaje } si los datos son invÃ¡lidos; 403 si no es su horario; 409 si tiene citas
+// futuras reservadas o si el nuevo rango se superpone con otro horario.
+export async function modificarHorario(idHorario: number, data: HorarioRequest, signal?: AbortSignal): Promise<Horario> {
+  if (MODO_SIMULADO) {
+    const sesion = sesionSimulada();
+    const horario = horarios.find((h) => h.idHorario === idHorario);
+    if (!horario || horario.idEspecialista !== sesion.idUsuario) {
+      throw await demora(new ApiError(403, 'No tienes permiso para realizar esta acciÃ³n.'), signal);
+    }
+    if (horario.estado === 'RESERVADO') throw await demora(new ApiError(409, MENSAJE_MODIFICAR_CON_CITA), signal);
+    const choca = horarios.some(
+      (h) => h.idHorario !== idHorario && h.idEspecialista === sesion.idUsuario && h.fecha === data.fecha && seSuperponen(h, data),
+    );
+    if (choca) throw await demora(new ApiError(409, MENSAJE_SUPERPUESTO), signal);
+    Object.assign(horario, data);
+    return demora(aHorarioPublico(horario), signal);
+  }
+
+  const modificado = aHorario(await request<unknown>(`/api/horarios/${idHorario}`, { method: 'PUT', body: data, signal }));
+  if (!modificado) throw new ApiError(502, MENSAJE_REGISTRO);
+  return modificado;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\informes.service.ts ===
+import type { InformeGeneral, RangoFechas } from '../types/informe';
+import { ApiError, request } from './api';
+import { MODO_SIMULADO } from './modo';
+import { ESPECIALISTAS_IDS, PERFILES, citas, demora, horarios } from './simulado/almacen';
+
+const MENSAJE_INFORME =
+  'No pudimos cargar el informe porque el servicio respondiÃ³ de forma inesperada. IntÃ©ntalo de nuevo mÃ¡s tarde.';
+
+const CLAVES: (keyof InformeGeneral)[] = [
+  'totalPacientes',
+  'totalEspecialistas',
+  'citasProgramadas',
+  'citasCanceladas',
+  'citasRealizadas',
+];
+
+// Solo se aceptan totales numÃ©ricos y no negativos: lo demÃ¡s no se muestra como si fuera un dato
+export function aInforme(crudo: unknown): InformeGeneral | null {
+  if (typeof crudo !== 'object' || crudo === null) return null;
+  const objeto = crudo as Record<string, unknown>;
+  const informe = {} as InformeGeneral;
+  for (const clave of CLAVES) {
+    const valor = objeto[clave];
+    if (typeof valor !== 'number' || !Number.isFinite(valor) || valor < 0) return null;
+    informe[clave] = valor;
+  }
+  return informe;
+}
+
+// HU-19 â€” GET /api/informes/general?desde=AAAA-MM-DD&hasta=AAAA-MM-DD (solo ROLE_ADMIN; ambas
+// fechas son opcionales y 403 si no es administrador). Devuelve los totales de pacientes,
+// especialistas y citas del periodo; con cero registros responde ceros, no un error.
+export async function obtenerInformeGeneral(rango: RangoFechas = {}, signal?: AbortSignal): Promise<InformeGeneral> {
+  if (MODO_SIMULADO) {
+    const enRango = (fecha: string) => (!rango.desde || fecha >= rango.desde) && (!rango.hasta || fecha <= rango.hasta);
+    const delPeriodo = citas.filter((c) => {
+      const horario = horarios.find((h) => h.idHorario === c.idHorario);
+      return horario ? enRango(horario.fecha) : false;
+    });
+    const cuenta = (estados: string[]) => delPeriodo.filter((c) => estados.includes(c.estado)).length;
+    return demora(
+      {
+        totalPacientes: Object.keys(PERFILES).filter((id) => !ESPECIALISTAS_IDS.has(Number(id)) && Number(id) !== 1).length,
+        totalEspecialistas: ESPECIALISTAS_IDS.size,
+        citasProgramadas: cuenta(['PROGRAMADA', 'CONFIRMADA', 'REPROGRAMADA', 'PENDIENTE']),
+        citasCanceladas: cuenta(['CANCELADA']),
+        citasRealizadas: cuenta(['COMPLETADA']),
+      },
+      signal,
+    );
+  }
+
+  const consulta = new URLSearchParams();
+  if (rango.desde) consulta.set('desde', rango.desde);
+  if (rango.hasta) consulta.set('hasta', rango.hasta);
+  const parametros = consulta.toString();
+  const informe = aInforme(await request<unknown>(`/api/informes/general${parametros ? `?${parametros}` : ''}`, { signal }));
+  if (!informe) throw new ApiError(502, MENSAJE_INFORME);
+  return informe;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\modo.ts ===
+// Solo desarrollo: con VITE_MODO_SIMULADO=true los servicios de sesiÃ³n, especialidades, horarios y
+// citas responden con datos en memoria (ver `services/simulado/`), para revisar las pantallas
+// mientras el backend de esas historias no estÃ¡ listo. En producciÃ³n (`vite build`) es siempre
+// false y el cÃ³digo simulado no se incluye.
+export const MODO_SIMULADO = import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true';
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\sesion.ts ===
+import type { Rol, Sesion } from '../types/auth';
+
+// La sesiÃ³n es una cookie HttpOnly (HU-25, requisito 13 del Sprint 2): la pone el backend,
+// el navegador la envÃ­a solo y ningÃºn script de la pÃ¡gina puede leerla. Por eso aquÃ­ ya no se
+// guarda ni se lee ningÃºn token: en `sessionStorage` o `localStorage` no se persiste nada.
+// Al recargar, <AuthProvider> pregunta al backend quiÃ©n es la persona (GET /api/auth/me).
+const ROLES: readonly string[] = ['ROLE_USUARIO', 'ROLE_ESPECIALISTA', 'ROLE_ADMIN'];
+
+export function esRol(valor: unknown): valor is Rol {
+  return typeof valor === 'string' && ROLES.includes(valor);
+}
+
+export function esSesion(valor: unknown): valor is Sesion {
+  if (typeof valor !== 'object' || valor === null) return false;
+  const s = valor as Record<string, unknown>;
+  return typeof s.idUsuario === 'number' && typeof s.nombre === 'string' && esRol(s.rol);
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\services\usuarios.service.ts ===
+import type { EspecialistaRequest, Perfil, PerfilRequest, RegistroRequest, UsuarioResponse } from '../types/usuario';
+import { ApiError, request } from './api';
+import { MODO_SIMULADO } from './modo';
+import {
+  ESPECIALISTAS_IDS,
+  PERFILES,
+  REGISTROS_MEDICOS,
+  correosRegistrados,
+  demora,
+  leerSesionSimulada,
+  nuevoIdUsuario,
+} from './simulado/almacen';
+
+const MENSAJE_PERFIL =
+  'No pudimos cargar los datos porque el servicio respondiÃ³ de forma inesperada. IntÃ©ntalo de nuevo mÃ¡s tarde.';
+const MENSAJE_ESPECIALISTA =
+  'El especialista pudo haberse registrado, pero el servicio respondiÃ³ de forma inesperada. Revisa antes de intentarlo otra vez.';
+const MENSAJE_CORREO_DUPLICADO = 'Ya existe una cuenta registrada con ese correo';
+
+// Se copian solo los campos que la interfaz muestra (el backend nunca debe enviar el hash)
+export function aPerfil(crudo: unknown): Perfil | null {
+  if (typeof crudo !== 'object' || crudo === null) return null;
+  const c = crudo as Record<string, unknown>;
+  if (
+    typeof c.idUsuario !== 'number' ||
+    typeof c.nombre !== 'string' ||
+    typeof c.apellido !== 'string' ||
+    typeof c.correo !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    idUsuario: c.idUsuario,
+    nombre: c.nombre,
+    apellido: c.apellido,
+    correo: c.correo,
+    telefono: typeof c.telefono === 'string' && c.telefono ? c.telefono : null,
+  };
+}
+
+// HU-01 â€” Registro de usuario: POST /api/usuarios (201 con UsuarioResponse, 400 con errores)
+export async function registrarUsuario(data: RegistroRequest, signal?: AbortSignal): Promise<UsuarioResponse> {
+  if (MODO_SIMULADO) {
+    if (correosRegistrados().has(data.correo.toLowerCase())) {
+      throw await demora(new ApiError(400, MENSAJE_CORREO_DUPLICADO), signal);
+    }
+    correosRegistrados().add(data.correo.toLowerCase());
+    const idUsuario = nuevoIdUsuario();
+    PERFILES[idUsuario] = { idUsuario, nombre: data.nombre, apellido: data.apellido, correo: data.correo, telefono: data.telefono ?? null };
+    return demora({ ...PERFILES[idUsuario] }, signal);
+  }
+  return request<UsuarioResponse>('/api/usuarios', { method: 'POST', body: data, signal });
+}
+
+// HU-03 â€” GET /api/usuarios/{id}: solo la propia persona puede consultar sus datos (403 si no)
+export async function obtenerPerfil(idUsuario: number, signal?: AbortSignal): Promise<Perfil> {
+  if (MODO_SIMULADO) {
+    const perfil = PERFILES[idUsuario];
+    if (!perfil) throw await demora(new ApiError(404, 'No encontramos lo que buscabas.'), signal);
+    return demora({ ...perfil }, signal);
+  }
+  const perfil = aPerfil(await request<unknown>(`/api/usuarios/${idUsuario}`, { signal }));
+  if (!perfil) throw new ApiError(502, MENSAJE_PERFIL);
+  return perfil;
+}
+
+// HU-03 â€” PUT /api/usuarios/{id}: 200 con los datos guardados; 400 con { campo: mensaje } o un
+// texto (por ejemplo, correo ya usado); 403 si el id no es el de la sesiÃ³n.
+export async function actualizarPerfil(idUsuario: number, data: PerfilRequest, signal?: AbortSignal): Promise<Perfil> {
+  if (MODO_SIMULADO) {
+    const actual = PERFILES[idUsuario];
+    const correo = data.correo.toLowerCase();
+    if (correo !== actual.correo.toLowerCase() && correosRegistrados().has(correo)) {
+      throw await demora(new ApiError(400, MENSAJE_CORREO_DUPLICADO), signal);
+    }
+    correosRegistrados().delete(actual.correo.toLowerCase());
+    correosRegistrados().add(correo);
+    PERFILES[idUsuario] = { idUsuario, nombre: data.nombre, apellido: data.apellido, correo: data.correo, telefono: data.telefono ?? null };
+    return demora({ ...PERFILES[idUsuario] }, signal);
+  }
+  const perfil = aPerfil(await request<unknown>(`/api/usuarios/${idUsuario}`, { method: 'PUT', body: data, signal }));
+  if (!perfil) throw new ApiError(502, MENSAJE_PERFIL);
+  return perfil;
+}
+
+// HU-04 â€” POST /api/especialistas (solo ROLE_ADMIN): crea la cuenta con ROLE_ESPECIALISTA.
+// 201 con los datos; 400 con { campo: mensaje }; 409 (o 400 con texto) si el correo ya existe.
+export async function registrarEspecialista(data: EspecialistaRequest, signal?: AbortSignal): Promise<Perfil> {
+  if (MODO_SIMULADO) {
+    const sesion = leerSesionSimulada();
+    if (sesion?.rol !== 'ROLE_ADMIN') throw await demora(new ApiError(403, 'No tienes permiso para realizar esta acciÃ³n.'), signal);
+    if (correosRegistrados().has(data.correo.toLowerCase())) {
+      throw await demora(new ApiError(409, MENSAJE_CORREO_DUPLICADO), signal);
+    }
+    correosRegistrados().add(data.correo.toLowerCase());
+    const idUsuario = nuevoIdUsuario();
+    PERFILES[idUsuario] = { idUsuario, nombre: data.nombre, apellido: data.apellido, correo: data.correo, telefono: data.telefono ?? null };
+    ESPECIALISTAS_IDS.add(idUsuario);
+    if (data.registroMedico) REGISTROS_MEDICOS[idUsuario] = data.registroMedico;
+    return demora({ ...PERFILES[idUsuario] }, signal);
+  }
+  const perfil = aPerfil(await request<unknown>('/api/especialistas', { method: 'POST', body: data, signal }));
+  if (!perfil) throw new ApiError(502, MENSAJE_ESPECIALISTA);
+  return perfil;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\types\auth.ts ===
+// HU-02 â€” Inicio de sesiÃ³n. Contrato de /api/auth/* (ver .kiro/steering/security.md)
+//
+// La sesiÃ³n vive en una cookie HttpOnly que pone el backend: el frontend nunca ve el token.
+// Solo conserva en memoria quiÃ©n es la persona (id, nombre y rol) para adaptar la interfaz.
+
+export type Rol = 'ROLE_USUARIO' | 'ROLE_ESPECIALISTA' | 'ROLE_ADMIN';
+
+export interface LoginRequest {
+  correo: string;
+  contrasena: string;
+}
+
+/** Lo que el frontend conserva de la sesiÃ³n iniciada */
+export interface Sesion {
+  idUsuario: number;
+  nombre: string;
+  rol: Rol;
+}
+
+/** Respuesta de POST /api/auth/login y de GET /api/auth/me (la cookie viaja en `Set-Cookie`) */
+export type LoginResponse = Sesion;
+
+/** HU-05 â€” POST /api/auth/recuperar-contrasena. El servidor responde igual exista o no el correo */
+export interface RecuperacionRequest {
+  correo: string;
+}
+
+/** HU-05 â€” POST /api/auth/restablecer-contrasena. El `token` es el del enlace que llegÃ³ al correo */
+export interface RestablecerContrasenaRequest {
+  token: string;
+  contrasena: string;
+  confirmarContrasena: string;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\types\cita.ts ===
+// HU-12, HU-13, HU-14 y HU-15 â€” Citas. Contrato de /api/citas
+
+export interface CitaRequest {
+  idHorario: number;
+  motivo?: string;
+}
+
+/** Lo que el backend devuelve al crear la cita: lo mÃ­nimo que exige la confirmaciÃ³n (HU-12) */
+export interface CitaCreada {
+  idCita: number;
+  especialidad: string;
+  /** AAAA-MM-DD */
+  fecha: string;
+  /** HH:mm */
+  horaInicio: string;
+  estado: string;
+}
+
+/** Una cita tal como la muestra la interfaz (HU-13). El backend responde con la entidad completa. */
+export interface Cita {
+  idCita: number;
+  idEspecialidad: number;
+  especialidad: string;
+  duracionMinutos: number;
+  idEspecialista: number | null;
+  /** Nombre y apellido del especialista */
+  especialista: string;
+  /** AAAA-MM-DD */
+  fecha: string;
+  /** HH:mm */
+  hora: string;
+  /** PROGRAMADA, CONFIRMADA, CANCELADA, REPROGRAMADA, COMPLETADA (o PENDIENTE) */
+  estado: string;
+}
+
+/** HU-15 â€” PUT /api/citas/{id}/reprogramar */
+export interface ReprogramarRequest {
+  idHorario: number;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\types\especialidad.ts ===
+// HU-06 y HU-08 â€” Especialidades. Contrato de /api/especialidades
+
+/** Solo los datos del especialista que la interfaz muestra */
+export interface EspecialistaResumen {
+  idUsuario: number;
+  nombre: string;
+  apellido: string;
+}
+
+export interface Especialidad {
+  idEspecialidad: number;
+  nombreEspecialidad: string;
+  descripcion: string;
+  duracionMinutos: number;
+  especialista: EspecialistaResumen | null;
+}
+
+export interface EspecialidadRequest {
+  nombreEspecialidad: string;
+  descripcion: string;
+  duracionMinutos: number;
+  idEspecialista: number;
+}
+
+/** HU-07 â€” PUT /api/especialidades/{id}: solo el especialista dueÃ±o puede editar sus especialidades */
+export interface EspecialidadUpdate {
+  nombreEspecialidad: string;
+  descripcion: string;
+  duracionMinutos: number;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\types\especialista.ts ===
+// HU-20 y HU-21 â€” Especialistas. Contrato propuesto de GET/PUT /api/especialistas
+// (el POST de HU-04 usa `EspecialistaRequest`, en types/usuario.ts)
+
+/** Especialidad que atiende un especialista: con el id se puede pedir la cita (HU-12) */
+export interface EspecialidadDeEspecialista {
+  idEspecialidad: number;
+  nombreEspecialidad: string;
+}
+
+export interface Especialista {
+  idUsuario: number;
+  nombre: string;
+  apellido: string;
+  correo: string;
+  telefono: string | null;
+  registroMedico: string | null;
+  especialidades: EspecialidadDeEspecialista[];
+}
+
+/** HU-21 â€” PUT /api/especialistas/{id}: solo ROLE_ADMIN. No cambia la contraseÃ±a ni el rol */
+export interface EspecialistaUpdate {
+  nombre: string;
+  apellido: string;
+  correo: string;
+  telefono?: string;
+  registroMedico?: string;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\types\horario.ts ===
+// HU-09, HU-10 y HU-11 â€” Horarios. Contrato propuesto de /api/horarios (docs/integracion-frontend-backend-sprint1.md)
+
+/** Libre, reservado (tiene una cita) o bloqueado por el especialista (HU-11) */
+export type EstadoHorario = 'LIBRE' | 'RESERVADO' | 'BLOQUEADO';
+
+export interface Horario {
+  idHorario: number;
+  /** Fecha concreta, formato AAAA-MM-DD */
+  fecha: string;
+  /** Formato HH:mm (24 h) */
+  horaInicio: string;
+  horaFin: string;
+  estado: EstadoHorario;
+}
+
+export interface HorarioRequest {
+  fecha: string;
+  horaInicio: string;
+  horaFin: string;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\types\informe.ts ===
+// HU-19 â€” Informe general. Contrato propuesto de GET /api/informes/general (solo ROLE_ADMIN)
+
+/** Periodo del informe, fechas AAAA-MM-DD. Sin ninguna, el informe abarca todo el historial */
+export interface RangoFechas {
+  desde?: string;
+  hasta?: string;
+}
+
+export interface InformeGeneral {
+  totalPacientes: number;
+  totalEspecialistas: number;
+  citasProgramadas: number;
+  citasCanceladas: number;
+  citasRealizadas: number;
+}
+=== C:\Users\Usuario\Downloads\frontend-sprint3-final\src\types\usuario.ts ===
+// HU-01 â€” Registro de usuario. Contrato de POST /api/usuarios
+
+export interface RegistroRequest {
+  nombre: string;
+  apellido: string;
+  correo: string;
+  contrasena: string;
+  confirmarContrasena: string;
+  telefono?: string;
+  /** HU-25: la persona aceptÃ³ el tratamiento de sus datos personales */
+  autorizaTratamientoDatos?: boolean;
+}
+
+export interface UsuarioResponse {
+  idUsuario: number;
+  nombre: string;
+  apellido: string;
+  correo: string;
+  telefono: string | null;
+}
+
+/** HU-03 â€” Datos personales de la cuenta. Contrato de GET/PUT /api/usuarios/{id} */
+export type Perfil = UsuarioResponse;
+
+export interface PerfilRequest {
+  nombre: string;
+  apellido: string;
+  correo: string;
+  telefono?: string;
+}
+
+/** HU-04 â€” Registro de especialistas. Contrato propuesto de POST /api/especialistas (solo administrador) */
+export interface EspecialistaRequest {
+  nombre: string;
+  apellido: string;
+  correo: string;
+  telefono?: string;
+  /** ContraseÃ±a temporal con la que el especialista inicia sesiÃ³n por primera vez */
+  contrasena: string;
+  registroMedico?: string;
+}

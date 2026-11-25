@@ -12,9 +12,6 @@ services:
       # URL pública del backend en Render, sin barra final. Se define en el panel de Render.
       - key: VITE_API_BASE_URL
         sync: false
-      # Demo con datos simulados (sin backend). Borrar esta variable para usar el backend real.
-      - key: VITE_MODO_DEMO
-        value: "true"
     # Con BrowserRouter, recargar o abrir directo /mis-citas daría 404 sin esta reescritura
     routes:
       - type: rewrite

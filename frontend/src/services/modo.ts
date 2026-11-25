@@ -1,10 +1,5 @@
-// Datos simulados en memoria (ver `services/simulado/`) en lugar del backend.
-// Se activan de dos formas:
-//  - Desarrollo: VITE_MODO_SIMULADO=true (solo con `npm run dev`).
-//  - Demo desplegada: VITE_MODO_DEMO=true al construir (`vite build`), para publicar el sitio
-//    mostrando las pantallas con datos de ejemplo mientras el backend no esté conectado.
-// Sin ninguna de las dos, el sitio usa el backend real.
-const SIMULADO_EN_DESARROLLO = import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true';
-const DEMO_DESPLEGADA = import.meta.env.VITE_MODO_DEMO === 'true';
-
-export const MODO_SIMULADO = SIMULADO_EN_DESARROLLO || DEMO_DESPLEGADA;
+// Solo desarrollo: con VITE_MODO_SIMULADO=true los servicios de sesión, especialidades, horarios y
+// citas responden con datos en memoria (ver `services/simulado/`), para revisar las pantallas
+// mientras el backend de esas historias no está listo. En producción (`vite build`) es siempre
+// false y el código simulado no se incluye.
+export const MODO_SIMULADO = import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true';
